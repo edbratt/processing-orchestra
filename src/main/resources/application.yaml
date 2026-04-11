@@ -1,0 +1,51 @@
+server:
+  port: 8080
+  host: "0.0.0.0"
+  tls:
+    private-key:
+      keystore:
+        passphrase: "changeit"
+        type: "PKCS12"
+        resource:
+          resource-path: "keystore.p12"
+    private-key-cert-chain:
+      keystore:
+        passphrase: "changeit"
+        type: "PKCS12"
+        resource:
+          resource-path: "keystore.p12"
+  features:
+    static-content:
+      classpath:
+        - context: "/"
+          location: "/static"
+          welcome: "index.html"
+
+processing:
+  width: 800
+  height: 600
+  fps: 60
+
+audio:
+  mode: "high-quality-stereo"
+  modes:
+    high-quality-stereo:
+      sample-rate: 44100
+      channels: 2
+      description: "44.1kHz Stereo - Best quality, highest bandwidth"
+    high-quality-mono:
+      sample-rate: 44100
+      channels: 1
+      description: "44.1kHz Mono - Good quality, moderate bandwidth"
+    voice:
+      sample-rate: 22050
+      channels: 1
+      description: "22.05kHz Mono - Voice quality, low bandwidth"
+  buffer-size: 2048
+  max-buffer-chunks: 20
+
+debug:
+  logging: false
+
+app:
+  greeting: "Hello"

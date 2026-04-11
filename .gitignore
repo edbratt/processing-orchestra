@@ -1,0 +1,27 @@
+target/
+*.class
+*.jar
+*.log
+
+Helidon starter template (not part of this project)
+processing-client/
+
+Keystore files (generate your own with create-keystore.ps1 or create-keystore.sh)
+keystore.p12
+src/main/resources/keystore.p12
+
+IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+OS metadata
+.DS_Store
+Thumbs.db
+
+Temporary/testing artifacts
+io/
+pom_helidon.xml
+*.tmp

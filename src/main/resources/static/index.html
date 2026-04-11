@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processing Server UI</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #00d9ff;
+        }
+        .session-info {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 12px;
+            color: #888;
+        }
+        .touch-area {
+            width: 100%;
+            height: 300px;
+            background: #16213e;
+            border: 2px solid #0f3460;
+            border-radius: 12px;
+            touch-action: none;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: #555;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .control-group {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input[type="range"] {
+            width: 100%;
+            height: 10px;
+            -webkit-appearance: none;
+            background: #0f3460;
+            border-radius: 5px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #00d9ff;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        button {
+            flex: 1;
+            min-width: 100px;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            background: #0f3460;
+            color: #eee;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:active {
+            background: #00d9ff;
+        }
+        button:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
+        .audio-controls {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #0f3460;
+        }
+        .audio-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .audio-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #555;
+        }
+        .audio-indicator.active {
+            background: #00ff00;
+            animation: pulse 1s infinite;
+        }
+        .audio-indicator.error {
+            background: #ff4444;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .audio-meter {
+            width: 100%;
+            height: 8px;
+            background: #0f3460;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .audio-meter-level {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00, #ffff00, #ff0000);
+            width: 0%;
+            transition: width 0.05s;
+        }
+        .audio-warning {
+            background: #332200;
+            border: 1px solid #665500;
+            border-radius: 4px;
+            padding: 8px;
+            margin-top: 10px;
+            font-size: 11px;
+            color: #ffcc00;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #16213e;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .status span {
+            display: inline-block;
+            margin-right: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Processing Server UI</h1>
+        <div class="session-info">Session ID: <span id="sessionId">connecting...</span></div>
+        
+        <div class="touch-area" id="touchArea">
+            Touch or drag here
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Size Slider: <span id="sizeValue">50</span>%</label>
+                <input type="range" id="sizeSlider" min="0" max="100" value="50">
+            </div>
+            
+            <div class="control-group">
+                <label>Speed Slider: <span id="speedValue">50</span>%</label>
+                <input type="range" id="speedSlider" min="0" max="100" value="50">
+            </div>
+            
+            <div class="control-group">
+                <label>Action Buttons</label>
+                <div class="buttons">
+                    <button id="btnAction1">Action 1</button>
+                    <button id="btnAction2">Action 2</button>
+                    <button id="btnAction3">Action 3</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>Audio Input</label>
+                <div class="audio-status">
+                    <div class="audio-indicator" id="audioIndicator"></div>
+                    <span id="audioStatusText">Not connected</span>
+                </div>
+                <div class="audio-meter">
+                    <div class="audio-meter-level" id="audioMeterLevel"></div>
+                </div>
+                <div class="audio-controls">
+                    <div class="buttons">
+                        <button id="btnStartAudio">Start Audio</button>
+                        <button id="btnStopAudio" disabled>Stop Audio</button>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; font-size: 11px; color: #888;">
+                    <span id="audioConfigInfo">Audio: Not configured</span>
+                </div>
+                <div id="audioWarning" class="audio-warning" style="display: none;">
+                    Microphone requires HTTPS when accessing from another device.
+                    Use <code>http://localhost:8080</code> on this machine, or configure HTTPS.
+                </div>
+            </div>
+        </div>
+        
+        <div class="status">
+            <span>Events sent: <span id="eventCount">0</span></span>
+            <span>Connection: <span id="connectionStatus">connecting</span></span>
+            <span>Audio: <span id="audioFormat">-</span></span>
+        </div>
+    </div>
+    
+    <script>
+        let ws;
+        let sessionId = null;
+        let eventCount = 0;
+        let audioContext = null;
+        let audioStream = null;
+        let audioProcessor = null;
+        let audioSource = null;
+        let audioAnalyser = null;
+        let audioRunning = false;
+        let audioConfig = { sampleRate: 44100, channels: 2, bufferSize: 4096 };
+        let audioConfigReceived = false;
+        let audioFrameCount = 0;
+        let audioIntervalId = null;
+        let debugLogging = false; // Set to true to enable console logging
+        
+        // Check URL parameters for debug mode
+        if (new URLSearchParams(window.location.search).has('debug')) {
+            debugLogging = true;
+        }
+        
+        function log(...args) {
+            if (debugLogging) console.log(...args);
+        }
+        
+        function logError(...args) {
+            console.error(...args); // Always log errors
+        }
+        
+        function canAccessMicrophone() {
+            const isLocalhost = window.location.hostname === 'localhost' || 
+                               window.location.hostname === '127.0.0.1';
+            const isHttps = window.location.protocol === 'https:';
+            return isLocalhost || isHttps;
+        }
+        
+        function updateAudioUI() {
+            if (!canAccessMicrophone()) {
+                document.getElementById('audioWarning').style.display = 'block';
+            }
+        }
+        
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = protocol + '//' + window.location.host + '/ws';
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+            
+            ws.onopen = () => {
+                document.getElementById('connectionStatus').textContent = 'connected';
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    if (typeof event.data === 'string') {
+                        const data = JSON.parse(event.data);
+                        handleServerMessage(data);
+                    }
+                } catch (e) {
+                    console.error('Failed to parse server message:', e, event.data);
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('connectionStatus').textContent = 'disconnected';
+                stopAudio();
+                setTimeout(connect, 2000);
+            };
+            
+            ws.onerror = () => {
+                document.getElementById('connectionStatus').textContent = 'error';
+            };
+        }
+        
+        function handleServerMessage(data) {
+            switch (data.type) {
+                case 'session':
+                    sessionId = data.sessionId;
+                    document.getElementById('sessionId').textContent = sessionId.substring(0, 8) + '...';
+                    if (data.sampleRate) {
+                        audioConfig.sampleRate = data.sampleRate;
+                        audioConfig.channels = data.channels || 2;
+                        audioConfig.bufferSize = data.bufferSize || 4096;
+                        audioConfigReceived = true;
+                        updateAudioConfigDisplay();
+                    }
+                    break;
+                case 'audio-config-ack':
+                    log('Audio config acknowledged:', data);
+                    break;
+            }
+        }
+        
+        function updateAudioConfigDisplay() {
+            const channels = audioConfig.channels === 2 ? 'Stereo' : 'Mono';
+            document.getElementById('audioConfigInfo').textContent = 
+                `Audio: ${audioConfig.sampleRate}Hz ${channels}`;
+            document.getElementById('audioFormat').textContent = 
+                `${audioConfig.sampleRate}Hz/${channels}`;
+        }
+        
+        function sendEvent(type, controlId, value = 0, x = 0, y = 0) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const event = {
+                    type: type,
+                    controlId: controlId,
+                    value: value,
+                    x: x,
+                    y: y,
+                    timestamp: Date.now()
+                };
+                ws.send(JSON.stringify(event));
+                eventCount++;
+                document.getElementById('eventCount').textContent = eventCount;
+            }
+        }
+        
+        async function startAudio() {
+            if (!canAccessMicrophone()) {
+                alert('Microphone access requires HTTPS.\n\n' +
+                      'Options:\n' +
+                      '1. Access from this machine: http://localhost:8080\n' +
+                      '2. Configure HTTPS on the server\n' +
+                      '3. Use a reverse proxy (nginx/Apache) with HTTPS');
+                return;
+            }
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                document.getElementById('audioStatusText').textContent = 'Microphone not supported';
+                document.getElementById('audioIndicator').classList.add('error');
+                return;
+            }
+            
+            try {
+                document.getElementById('audioStatusText').textContent = 'Requesting mic...';
+                
+                audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: audioConfig.sampleRate,
+                        channelCount: audioConfig.channels
+                    }
+                });
+                log('Got audio stream:', audioStream.getAudioTracks()[0]?.label || 'unknown');
+                
+                audioContext = new AudioContext({ sampleRate: audioConfig.sampleRate });
+                log('AudioContext created, state:', audioContext.state);
+                
+                if (audioContext.state === 'suspended') {
+                    log('Resuming suspended AudioContext...');
+                    await audioContext.resume();
+                }
+                log('AudioContext state after resume:', audioContext.state);
+                
+                audioSource = audioContext.createMediaStreamSource(audioStream);
+                log('AudioSource created');
+                
+                // Create analyser
+                audioAnalyser = audioContext.createAnalyser();
+                audioAnalyser.fftSize = 2048;
+                const bufferLength = audioAnalyser.frequencyBinCount;
+                
+                log('Analyser created, bufferLength:', bufferLength);
+                
+                const bufferSize = audioConfig.bufferSize;
+                const numInputChannels = audioConfig.channels;
+                const numOutputChannels = audioConfig.channels;
+                
+                audioProcessor = audioContext.createScriptProcessor(bufferSize, numInputChannels, numOutputChannels);
+                log('ScriptProcessor created, bufferSize:', bufferSize);
+                
+                audioProcessor.onaudiaprocess = (e) => {
+                    audioFrameCount++;
+                    if (audioFrameCount <= 5) {
+                        log('Audio frame', audioFrameCount, '- callback firing, audioRunning=' + audioRunning);
+                    }
+                    
+                    if (!audioRunning) return;
+                    
+                    try {
+                        const inputData = e.inputBuffer;
+                        
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            // Send binary audio data directly (no base64)
+                            const pcmData = floatTo16BitPCM(inputData, bufferSize, numInputChannels);
+                            ws.send(pcmData);
+                        }
+                        
+                        updateAudioMeter(inputData, bufferSize, numInputChannels);
+                    } catch (err) {
+                        logError('Audio process error:', err);
+                    }
+                };
+                
+                // Connect: source -> analyser -> processor -> destination
+                audioSource.connect(audioAnalyser);
+                audioAnalyser.connect(audioProcessor);
+                audioProcessor.connect(audioContext.destination);
+                log('Audio graph connected: source -> analyser -> processor -> destination');
+                
+                // Fallback: Use interval to read analyser data if onaudioprocess doesn't fire
+                // This is more reliable than ScriptProcessor in some browsers
+                let analyserFallbackCount = 0;
+                const analyserInterval = setInterval(() => {
+                    if (!audioRunning) {
+                        clearInterval(analyserInterval);
+                        return;
+                    }
+                    
+                    // Check if onaudioprocess is firing
+                    if (audioFrameCount === 0) {
+                        // onaudioprocess never fired - use analyser fallback
+                        analyserFallbackCount++;
+                        if (analyserFallbackCount === 1) {
+                            log('onaudioprocess not firing - using analyser fallback');
+                        }
+                        
+                        const dataArray = new Float32Array(bufferLength);
+                        audioAnalyser.getFloatTimeDomainData(dataArray);
+                        
+                        // Update meter
+                        let sum = 0;
+                        for (let i = 0; i < dataArray.length; i++) {
+                            sum += Math.abs(dataArray[i]);
+                        }
+                        const avg = sum / dataArray.length;
+                        const level = Math.min(100, avg * 300);
+                        document.getElementById('audioMeterLevel').style.width = level + '%';
+                        
+                        // Send to server (binary)
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            const pcmData = floatArrayTo16BitPCM(dataArray);
+                            ws.send(pcmData);
+                        }
+                        
+                        if (analyserFallbackCount % 60 === 0) {
+                            log('Analyser fallback - avg:', avg.toFixed(4), 'level:', level.toFixed(1));
+                        }
+                    } else {
+                        // onaudioprocess is working - clear interval
+                        clearInterval(analyserInterval);
+                        log('onaudioprocess is working - cleared fallback interval');
+                    }
+                }, bufferSize / audioConfig.sampleRate * 1000); // Match buffer duration
+                
+                audioIntervalId = analyserInterval;
+                
+                audioRunning = true;
+                audioFrameCount = 0;
+                document.getElementById('audioIndicator').classList.remove('error');
+                document.getElementById('audioIndicator').classList.add('active');
+                document.getElementById('audioStatusText').textContent = 'Streaming';
+                document.getElementById('btnStartAudio').disabled = true;
+                document.getElementById('btnStopAudio').disabled = false;
+                
+                sendEvent('audio-start', 'audio');
+                
+                log('Audio started - context state:', audioContext.state);
+                
+            } catch (err) {
+                logError('Error starting audio:', err);
+                let msg = err.message;
+                if (err.name === 'NotAllowedError') {
+                    msg = 'Microphone permission denied';
+                } else if (err.name === 'NotFoundError') {
+                    msg = 'No microphone found';
+                } else if (err.name === 'NotReadableError') {
+                    msg = 'Microphone in use by another app';
+                }
+                document.getElementById('audioStatusText').textContent = 'Error: ' + msg;
+                document.getElementById('audioIndicator').classList.add('error');
+                document.getElementById('btnStartAudio').disabled = false;
+                document.getElementById('btnStopAudio').disabled = true;
+            }
+        }
+        
+        function stopAudio() {
+            audioRunning = false;
+            
+            if (audioIntervalId) {
+                clearInterval(audioIntervalId);
+                audioIntervalId = null;
+            }
+            
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor = null;
+            }
+            if (audioAnalyser) {
+                audioAnalyser.disconnect();
+                audioAnalyser = null;
+            }
+            if (audioSource) {
+                audioSource.disconnect();
+                audioSource = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+            
+            document.getElementById('audioIndicator').classList.remove('active');
+            document.getElementById('audioIndicator').classList.remove('error');
+            document.getElementById('audioStatusText').textContent = 'Not connected';
+            document.getElementById('btnStartAudio').disabled = false;
+            document.getElementById('btnStopAudio').disabled = true;
+            document.getElementById('audioMeterLevel').style.width = '0%';
+            
+            sendEvent('audio-stop', 'audio');
+        }
+        
+        function floatTo16BitPCM(inputBuffer, length, channels) {
+            const bytesPerSample = 2;
+            const totalSamples = length * channels;
+            const buffer = new ArrayBuffer(totalSamples * bytesPerSample);
+            const view = new DataView(buffer);
+            
+            for (let channel = 0; channel < channels; channel++) {
+                const channelData = inputBuffer.getChannelData(channel);
+                for (let i = 0; i < length; i++) {
+                    const sample = Math.max(-1, Math.min(1, channelData[i]));
+                    const value = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    view.setInt16((i * channels + channel) * 2, value, true);
+                }
+            }
+            
+            return buffer;
+        }
+        
+        function floatArrayTo16BitPCM(floatArray) {
+            const buffer = new ArrayBuffer(floatArray.length * 2);
+            const view = new DataView(buffer);
+            
+            for (let i = 0; i < floatArray.length; i++) {
+                const sample = Math.max(-1, Math.min(1, floatArray[i]));
+                const value = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                view.setInt16(i * 2, value, true);
+            }
+            
+            return buffer;
+        }
+        
+        function arrayBufferToBase64(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return window.btoa(binary);
+        }
+        
+        function updateAudioMeter(inputBuffer, length, channels) {
+            let sum = 0;
+            for (let channel = 0; channel < channels; channel++) {
+                const channelData = inputBuffer.getChannelData(channel);
+                for (let i = 0; i < length; i++) {
+                    sum += Math.abs(channelData[i]);
+                }
+            }
+            const avg = sum / (length * channels);
+            const level = Math.min(100, avg * 300);
+            document.getElementById('audioMeterLevel').style.width = level + '%';
+            
+            audioFrameCount++;
+            if (debugLogging && audioFrameCount % 30 === 0) {
+                log('Audio meter: avg=' + avg.toFixed(4) + ' level=' + level.toFixed(1) + '%');
+            }
+        }
+        
+        const touchArea = document.getElementById('touchArea');
+        
+        touchArea.addEventListener('touchstart', handleTouch, { passive: false });
+        touchArea.addEventListener('touchmove', handleTouch, { passive: false });
+        touchArea.addEventListener('mousedown', handleMouse);
+        touchArea.addEventListener('mousemove', (e) => {
+            if (e.buttons === 1) handleMouse(e);
+        });
+        
+        function handleTouch(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = touchArea.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) / rect.width;
+            const y = (touch.clientY - rect.top) / rect.height;
+            sendEvent('touch', 'touchArea', 0, x, y);
+        }
+        
+        function handleMouse(e) {
+            const rect = touchArea.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            sendEvent('touch', 'touchArea', 0, x, y);
+        }
+        
+        document.getElementById('sizeSlider').addEventListener('input', (e) => {
+            const value = e.target.value / 100;
+            document.getElementById('sizeValue').textContent = e.target.value;
+            sendEvent('slider', 'sizeSlider', value);
+        });
+        
+        document.getElementById('speedSlider').addEventListener('input', (e) => {
+            const value = e.target.value / 100;
+            document.getElementById('speedValue').textContent = e.target.value;
+            sendEvent('slider', 'speedSlider', value);
+        });
+        
+        document.getElementById('btnAction1').addEventListener('click', () => {
+            sendEvent('button', 'action1');
+        });
+        
+        document.getElementById('btnAction2').addEventListener('click', () => {
+            sendEvent('button', 'action2');
+        });
+        
+        document.getElementById('btnAction3').addEventListener('click', () => {
+            sendEvent('button', 'action3');
+        });
+        
+        document.getElementById('btnStartAudio').addEventListener('click', startAudio);
+        document.getElementById('btnStopAudio').addEventListener('click', stopAudio);
+        
+        // Initialize
+        updateAudioUI();
+        connect();
+    </script>
+</body>
+</html>
