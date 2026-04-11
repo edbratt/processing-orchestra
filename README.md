@@ -1,5 +1,8 @@
 # Processing Server - Multi-User Web Controller
 
+[![CI](https://github.com/edbratt/processing-orchestra/actions/workflows/ci.yml/badge.svg)](https://github.com/edbratt/processing-orchestra/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A multi-user web-based controller for Processing.org visual sketches. Multiple users can connect via web browsers, interact with UI controls (touch areas, sliders, buttons), and stream audio - all aggregated in real-time on a server-side Processing canvas.
 
 ## Features
