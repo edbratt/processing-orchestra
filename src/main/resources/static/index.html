@@ -156,6 +156,22 @@
             border-radius: 8px;
             font-size: 12px;
         }
+        .banner {
+            display: none;
+            margin-bottom: 16px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .banner.visible {
+            display: block;
+        }
+        .banner.warning {
+            background: #3d2617;
+            border: 1px solid #9b5a22;
+            color: #ffd3a6;
+        }
         .status span {
             display: inline-block;
             margin-right: 20px;
@@ -165,6 +181,7 @@
 <body>
     <div class="container">
         <h1>Processing Server UI</h1>
+        <div class="banner warning" id="connectionBanner"></div>
         <div class="session-info">Session ID: <span id="sessionId">connecting...</span></div>
         
         <div class="touch-area" id="touchArea">
@@ -185,9 +202,9 @@
             <div class="control-group">
                 <label>Action Buttons</label>
                 <div class="buttons">
-                    <button id="btnAction1">Action 1</button>
-                    <button id="btnAction2">Action 2</button>
-                    <button id="btnAction3">Action 3</button>
+                    <button id="btnAction1">Burst</button>
+                    <button id="btnAction2">Spin Color</button>
+                    <button id="btnAction3">Scatter</button>
                 </div>
             </div>
             
@@ -204,6 +221,10 @@
                     <div class="buttons">
                         <button id="btnStartAudio">Start Audio</button>
                         <button id="btnStopAudio" disabled>Stop Audio</button>
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <label>Audio Gain: <span id="gainValue">0 dB</span></label>
+                        <input type="range" id="gainSlider" min="0" max="100" value="50">
                     </div>
                 </div>
                 <div style="margin-top: 10px; font-size: 11px; color: #888;">
@@ -238,6 +259,7 @@
         let audioFrameCount = 0;
         let audioIntervalId = null;
         let debugLogging = false; // Set to true to enable console logging
+        let shutdownNoticeReceived = false;
         
         // Check URL parameters for debug mode
         if (new URLSearchParams(window.location.search).has('debug')) {
@@ -250,6 +272,16 @@
         
         function logError(...args) {
             console.error(...args); // Always log errors
+        }
+
+        function formatGainLabel(sliderValue) {
+            const normalized = sliderValue / 100;
+            const gainFactor = Math.pow(2, (normalized - 0.5) * 4);
+            const db = 20 * Math.log10(gainFactor);
+            if (Math.abs(db) < 0.5) {
+                return '0 dB';
+            }
+            return `${db > 0 ? '+' : ''}${Math.round(db)} dB`;
         }
         
         function canAccessMicrophone() {
@@ -264,15 +296,30 @@
                 document.getElementById('audioWarning').style.display = 'block';
             }
         }
+
+        function showBanner(message, scrollToTop = false) {
+            const banner = document.getElementById('connectionBanner');
+            banner.textContent = message;
+            banner.classList.add('visible');
+            if (scrollToTop) {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+
+        function hideBanner() {
+            document.getElementById('connectionBanner').classList.remove('visible');
+        }
         
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = protocol + '//' + window.location.host + '/ws';
             ws = new WebSocket(wsUrl);
             ws.binaryType = 'arraybuffer';
-            
+             
             ws.onopen = () => {
+                shutdownNoticeReceived = false;
                 document.getElementById('connectionStatus').textContent = 'connected';
+                hideBanner();
             };
             
             ws.onmessage = (event) => {
@@ -289,11 +336,17 @@
             ws.onclose = () => {
                 document.getElementById('connectionStatus').textContent = 'disconnected';
                 stopAudio();
+                if (shutdownNoticeReceived) {
+                    showBanner('The server shut down cleanly. Refresh this page after the server starts again.', true);
+                    return;
+                }
+                showBanner('Connection to the server was lost. Attempting to reconnect...', true);
                 setTimeout(connect, 2000);
             };
-            
+             
             ws.onerror = () => {
                 document.getElementById('connectionStatus').textContent = 'error';
+                showBanner('A connection error occurred. The page will keep trying to reconnect.', true);
             };
         }
         
@@ -312,6 +365,10 @@
                     break;
                 case 'audio-config-ack':
                     log('Audio config acknowledged:', data);
+                    break;
+                case 'server-shutdown':
+                    shutdownNoticeReceived = true;
+                    showBanner(data.reason || 'The server is shutting down.', true);
                     break;
             }
         }
@@ -632,6 +689,12 @@
             const value = e.target.value / 100;
             document.getElementById('speedValue').textContent = e.target.value;
             sendEvent('slider', 'speedSlider', value);
+        });
+
+        document.getElementById('gainSlider').addEventListener('input', (e) => {
+            const value = e.target.value / 100;
+            document.getElementById('gainValue').textContent = formatGainLabel(Number(e.target.value));
+            sendEvent('slider', 'gainSlider', value);
         });
         
         document.getElementById('btnAction1').addEventListener('click', () => {

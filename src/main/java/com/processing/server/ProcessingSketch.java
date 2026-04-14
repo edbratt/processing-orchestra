@@ -9,6 +9,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class ProcessingSketch extends PApplet {
+    private static final float DEFAULT_SIZE = 0.5f;
+    private static final float DEFAULT_SPEED = 0.5f;
+    private static final float DEFAULT_GAIN = 0.5f;
+
     private final EventQueue eventQueue;
     private final AudioBuffer audioBuffer;
     private final int sketchWidth;
@@ -16,8 +20,16 @@ public class ProcessingSketch extends PApplet {
     private final DebugConfig debugConfig;
     
     private final Map<String, float[]> userPositions = new HashMap<>();
+    // Touch events update the target position; draw() eases toward it so the speed slider can
+    // control how quickly each user's visuals respond.
+    private final Map<String, float[]> userTargetPositions = new HashMap<>();
     private final Map<String, float[]> userColors = new HashMap<>();
     private final Map<String, float[]> userAudioLevels = new HashMap<>();
+    private final Map<String, Float> userSizes = new HashMap<>();
+    private final Map<String, Float> userSpeeds = new HashMap<>();
+    private final Map<String, Float> userGains = new HashMap<>();
+    private final Map<String, Float> userPulseBoosts = new HashMap<>();
+    private final Map<String, Float> userHueVelocities = new HashMap<>();
     
     private float globalAudioLevel = 0;
     private float smoothedGlobalAudioLevel = 0;
@@ -78,23 +90,42 @@ public class ProcessingSketch extends PApplet {
                 if (!userPositions.containsKey(sessionId)) {
                     initializeUser(sessionId);
                 }
-                float[] pos = userPositions.get(sessionId);
-                pos[0] = event.x();
-                pos[1] = event.y();
+                float[] targetPos = userTargetPositions.get(sessionId);
+                targetPos[0] = event.x();
+                targetPos[1] = event.y();
             }
             case "slider" -> {
-                if (!userColors.containsKey(sessionId)) {
+                if (!userPositions.containsKey(sessionId)) {
                     initializeUser(sessionId);
                 }
-                float[] color = userColors.get(sessionId);
-                color[1] = map(event.value(), 0, 1, 20, 100);
+                if ("sizeSlider".equals(event.controlId())) {
+                    userSizes.put(sessionId, constrain(event.value(), 0, 1));
+                } else if ("speedSlider".equals(event.controlId())) {
+                    userSpeeds.put(sessionId, constrain(event.value(), 0, 1));
+                } else if ("gainSlider".equals(event.controlId())) {
+                    // The UI sends a normalized 0..1 slider value; we turn that into a gain curve
+                    // later when deriving audio amplitude from incoming PCM.
+                    userGains.put(sessionId, constrain(event.value(), 0, 1));
+                }
             }
             case "button" -> {
-                if (!userColors.containsKey(sessionId)) {
+                if (!userPositions.containsKey(sessionId)) {
                     initializeUser(sessionId);
                 }
-                float[] color = userColors.get(sessionId);
-                color[0] = (color[0] + 30) % 360;
+                handleButtonEvent(sessionId, event.controlId());
+            }
+        }
+    }
+
+    private void handleButtonEvent(String sessionId, String controlId) {
+        switch (controlId) {
+            case "action1" -> userPulseBoosts.put(sessionId, 1.0f);
+            case "action2" -> userHueVelocities.put(sessionId, random(-12f, 12f));
+            case "action3" -> {
+                userTargetPositions.put(sessionId, findNonOverlappingPosition());
+                userPulseBoosts.put(sessionId, max(userPulseBoosts.getOrDefault(sessionId, 0f), 0.45f));
+            }
+            default -> {
             }
         }
     }
@@ -125,7 +156,13 @@ public class ProcessingSketch extends PApplet {
     private void initializeUser(String sessionId) {
         float[] position = findNonOverlappingPosition();
         userPositions.put(sessionId, position);
+        userTargetPositions.put(sessionId, position.clone());
         userColors.put(sessionId, new float[]{random(360), 70, 100});
+        userSizes.put(sessionId, DEFAULT_SIZE);
+        userSpeeds.put(sessionId, DEFAULT_SPEED);
+        userGains.put(sessionId, DEFAULT_GAIN);
+        userPulseBoosts.put(sessionId, 0f);
+        userHueVelocities.put(sessionId, 0f);
         
         if (debugConfig.isLogging()) {
             println("Initialized user " + sessionId.substring(0, 8) + " at position (" 
@@ -176,12 +213,16 @@ public class ProcessingSketch extends PApplet {
         }
         
         float sum = 0;
-        int channels = audioBuffer.getChannels();
         int samples = data.length / 2;
+        // Map the normalized gain slider to a musically useful range around unity so the midpoint
+        // feels like "leave the signal alone" instead of "50% volume".
+        float gainValue = userGains.getOrDefault(sessionId, DEFAULT_GAIN);
+        float gainFactor = pow(2.0f, (gainValue - 0.5f) * 4.0f);
         
         for (int i = 0; i < samples; i++) {
             short sample = (short) ((data[i * 2] & 0xFF) | (data[i * 2 + 1] << 8));
-            sum += Math.abs(sample) / 32768.0f;
+            float normalized = constrain((sample / 32768.0f) * gainFactor, -1.0f, 1.0f);
+            sum += Math.abs(normalized);
         }
         
         float level = sum / samples;
@@ -192,18 +233,39 @@ public class ProcessingSketch extends PApplet {
         for (Map.Entry<String, float[]> entry : userPositions.entrySet()) {
             String sessionId = entry.getKey();
             float[] pos = entry.getValue();
+            float[] targetPos = userTargetPositions.getOrDefault(sessionId, pos);
             float[] color = userColors.getOrDefault(sessionId, new float[]{0, 50, 100});
             float[] audioLevel = userAudioLevels.getOrDefault(sessionId, new float[]{0});
+            float sizeValue = userSizes.getOrDefault(sessionId, DEFAULT_SIZE);
+            float speedValue = userSpeeds.getOrDefault(sessionId, DEFAULT_SPEED);
+            float pulseBoost = userPulseBoosts.getOrDefault(sessionId, 0f);
+            float hueVelocity = userHueVelocities.getOrDefault(sessionId, 0f);
+
+            // One slider drives both movement response and how quickly temporary effects settle.
+            float updateSpeed = map(speedValue, 0, 1, 0.04f, 0.35f);
+            float animationSpeed = map(speedValue, 0, 1, 0.85f, 2.8f);
+            float decay = map(speedValue, 0, 1, 0.035f, 0.18f);
+            pos[0] = lerp(pos[0], targetPos[0], updateSpeed);
+            pos[1] = lerp(pos[1], targetPos[1], updateSpeed);
+
+            hueVelocity = lerp(hueVelocity, 0, decay);
+            color[0] = (color[0] + hueVelocity * animationSpeed + 360) % 360;
+            userHueVelocities.put(sessionId, hueVelocity);
+
+            pulseBoost = lerp(pulseBoost, 0, decay);
+            userPulseBoosts.put(sessionId, pulseBoost);
             
-            float baseSize = 30;
-            float audioScale = 1 + audioLevel[0] * 2;
-            float size = baseSize * audioScale;
+            float baseSize = map(sizeValue, 0, 1, 20, 90);
+            // The inner circle reflects the requested size; the outer ring stays proportional and
+            // expands further with live audio and button-triggered pulse boosts.
+            float audioScale = 1 + audioLevel[0] * 2 + pulseBoost * 1.8f;
+            float coreSize = baseSize;
+            float pulseSize = coreSize * (1.5f * audioScale);
             
             fill(color[0], color[1], color[2]);
             noStroke();
-            ellipse(pos[0] * sketchWidth, pos[1] * sketchHeight, size, size);
+            ellipse(pos[0] * sketchWidth, pos[1] * sketchHeight, coreSize, coreSize);
             
-            float pulseSize = size * 1.5f * audioScale;
             stroke(color[0], color[1] * 0.5f, color[2] * 0.5f);
             strokeWeight(2);
             noFill();

@@ -1,5 +1,8 @@
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$classPath = "$scriptDir\target\classes;$scriptDir\target\libs\*"
+$jarPath = Get-ChildItem -Path (Join-Path $scriptDir "target") -Filter "processing-server-*.jar" -File |
+    Where-Object { $_.Name -notlike "*-sources.jar" -and $_.Name -notlike "*-javadoc.jar" -and $_.Name -notlike "*-original.jar" } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
 
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     Write-Host "ERROR: 'java' not found in PATH." -ForegroundColor Red
@@ -10,9 +13,15 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
 
 Write-Host "Starting Processing Server..." -ForegroundColor Green
 Write-Host "Server will be available at:" -ForegroundColor Cyan
-Write-Host "  - https://localhost:8080" -ForegroundColor White
+Write-Host "  - http://localhost:8080" -ForegroundColor White
 Write-Host ""
-Write-Host "Note: Check console output for your local IP" -ForegroundColor Gray
+Write-Host "Optional LAN HTTPS is available via .\run-https.ps1 after generating keystore.p12." -ForegroundColor Gray
 Write-Host ""
 
-java -cp $classPath com.processing.server.Main
+if (-not $jarPath) {
+    Write-Host "ERROR: Packaged jar not found under $scriptDir\target" -ForegroundColor Red
+    Write-Host "Run 'mvn package -DskipTests' first." -ForegroundColor Yellow
+    exit 1
+}
+
+java -jar $jarPath.FullName

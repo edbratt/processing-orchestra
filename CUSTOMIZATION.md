@@ -111,7 +111,7 @@ debug:
 
 **Or via URL parameter:**
 ```
-https://localhost:8080/?debug
+http://localhost:8080/?debug
 ```
 
 ---
@@ -983,8 +983,8 @@ Here's the changed code: [paste]
 
 2. **Open multiple browser tabs:**
    ```
-   https://localhost:8080/
-   https://localhost:8080/?debug
+   http://localhost:8080/
+   http://localhost:8080/?debug
    ```
 
 3. **Test each control:**
@@ -1011,7 +1011,6 @@ Here's the changed code: [paste]
 2. **Regenerate keystore with your IP:**
    ```bash
    ./create-keystore.sh YOUR_LOCAL_IP
-   cp keystore.p12 src/main/resources/
    mvn clean package -DskipTests
    ```
 

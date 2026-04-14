@@ -42,44 +42,15 @@ Some estimates can be made from architecture, but real testing would give defini
 
 ---
 
-## Keystore Improvements
+## Keystore Follow-Up
 
-### Current Limitation
+The keystore scripts now generate `keystore.p12` at the project root, export `processing-server-ca.cer`, and include `hostname.local` plus the current LAN IP in the SAN list.
 
-The server certificate includes the local IP address in the Subject Alternative Name (SAN) extension. When a laptop changes networks, the IP address changes, causing certificate validation errors in browsers.
-
-**Current workaround:** Users must regenerate the keystore when their IP changes.
-
-### Proposed Improvement: Hostname-based SAN
-
-Add `HOSTNAME.local` to the certificate SAN so users can connect via mDNS hostname, which doesn't change between networks.
-
-**Modification needed in `create-keystore.ps1`:**
-
-```powershell
-# Add hostname detection
-$Hostname = "$env:COMPUTERNAME.local"
-
-# Update SAN extension in cert generation (around line 90)
--ext "SAN=DNS:localhost,DNS:$Hostname,IP:127.0.0.1,IP:$LocalIP"
-```
-
-**Modification needed in `create-keystore.sh`:**
-
-```bash
-# Add hostname detection
-HOSTNAME_LOCAL=$(hostname).local
-
-# Update SAN extension in cert generation
--ext "SAN=DNS:localhost,DNS:$HOSTNAME_LOCAL,IP:127.0.0.1,IP:$LOCAL_IP"
-```
-
-**Tasks:**
+Remaining follow-up:
 - [ ] Test hostname-based SAN on Windows 10/11
 - [ ] Test hostname-based SAN on macOS (mDNS/Bonjour)
 - [ ] Test hostname-based SAN on Linux with avahi
-- [ ] Update scripts and documentation when confirmed working
-- [ ] Document any edge cases (corporate networks blocking mDNS, etc.)
+- [ ] Document edge cases such as corporate networks blocking mDNS
 
 ---
 

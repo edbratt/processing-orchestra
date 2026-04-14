@@ -6,8 +6,11 @@ package com.processing.server;
 
 import java.io.StringReader;
 import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.helidon.common.buffers.BufferData;
+import io.helidon.websocket.WsCloseCodes;
 import io.helidon.websocket.WsListener;
 import io.helidon.websocket.WsSession;
 
@@ -19,6 +22,7 @@ import jakarta.json.JsonValue;
 
 public class WebSocketHandler implements WsListener {
     private static final JsonBuilderFactory JSON = Json.createBuilderFactory(Collections.emptyMap());
+    private static final Set<WsSession> OPEN_SESSIONS = ConcurrentHashMap.newKeySet();
 
     private final SessionManager sessionManager;
     private final EventQueue eventQueue;
@@ -38,6 +42,7 @@ public class WebSocketHandler implements WsListener {
 
     @Override
     public void onOpen(WsSession session) {
+        OPEN_SESSIONS.add(session);
         this.sessionId = sessionManager.createSession();
         JsonObject welcome = JSON.createObjectBuilder()
             .add("type", "session")
@@ -132,6 +137,7 @@ public class WebSocketHandler implements WsListener {
 
     @Override
     public void onClose(WsSession session, int status, String reason) {
+        OPEN_SESSIONS.remove(session);
         if (sessionId != null) {
             sessionManager.removeSession(sessionId);
             audioBuffer.clearSession(sessionId);
@@ -143,10 +149,28 @@ public class WebSocketHandler implements WsListener {
 
     @Override
     public void onError(WsSession session, Throwable t) {
+        OPEN_SESSIONS.remove(session);
         if (sessionId != null) {
             sessionManager.removeSession(sessionId);
             audioBuffer.clearSession(sessionId);
             System.err.println("WebSocket error for session " + sessionId.substring(0, 8) + ": " + t.getMessage());
         }
+    }
+
+    public static void broadcastShutdown(String reason) {
+        JsonObject message = JSON.createObjectBuilder()
+            .add("type", "server-shutdown")
+            .add("reason", reason)
+            .build();
+
+        for (WsSession session : OPEN_SESSIONS) {
+            try {
+                session.send(message.toString(), true)
+                    .close(WsCloseCodes.GOING_AWAY, reason);
+            } catch (Exception ignored) {
+                session.terminate();
+            }
+        }
+        OPEN_SESSIONS.clear();
     }
 }

@@ -1,19 +1,6 @@
 server:
   port: 8080
-  host: "0.0.0.0"
-  tls:
-    private-key:
-      keystore:
-        passphrase: "changeit"
-        type: "PKCS12"
-        resource:
-          resource-path: "keystore.p12"
-    private-key-cert-chain:
-      keystore:
-        passphrase: "changeit"
-        type: "PKCS12"
-        resource:
-          resource-path: "keystore.p12"
+  host: "127.0.0.1"
   features:
     static-content:
       classpath:
@@ -46,6 +33,3 @@ audio:
 
 debug:
   logging: false
-
-app:
-  greeting: "Hello"
