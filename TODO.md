@@ -60,8 +60,16 @@ Remaining follow-up:
 
 - [ ] Add configurable sample rate/channel options in application.yaml
 - [ ] Implement audio compression (Opus codec) to reduce bandwidth
-- [ ] Add client-side audio level meter in the UI
+- [x] Add client-side audio level meter in the UI
 - [ ] Support client muting/unmuting from server
+
+### Video
+
+ - [ ] Add video stream as an input to Processing sketch.
+
+### Client enhancements
+
+ - [x] Add accelerometer data (phone/tablet) as input to Processing sketch.
 
 ### Visualization Enhancements
 

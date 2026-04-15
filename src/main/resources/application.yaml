@@ -31,5 +31,21 @@ audio:
   buffer-size: 2048
   max-buffer-chunks: 20
 
+motion:
+  update-hz: 20
+  clamp:
+    alpha-degrees: 180
+    beta-degrees: 60
+    gamma-degrees: 60
+    acceleration-g: 3.0
+    magnitude-g: 4.0
+  mapping:
+    tilt-offset-normalized: 0.12
+    shake-threshold-g: 0.2
+    shake-burst-scale: 1.8
+  debug:
+    logging: false
+    sample-limit: 5
+
 debug:
   logging: false

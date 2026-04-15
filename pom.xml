@@ -31,12 +31,12 @@
             <artifactId>helidon-config-yaml</artifactId>
         </dependency>
         <dependency>
-            <groupId>jakarta.json</groupId>
-            <artifactId>jakarta.json-api</artifactId>
+            <groupId>io.helidon.http.media</groupId>
+            <artifactId>helidon-http-media-json</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.helidon.http.media</groupId>
-            <artifactId>helidon-http-media-jsonp</artifactId>
+            <groupId>io.helidon.json</groupId>
+            <artifactId>helidon-json</artifactId>
         </dependency>
         <dependency>
             <groupId>io.helidon.logging</groupId>

@@ -3,7 +3,24 @@
 [![CI](https://github.com/edbratt/processing-orchestra/actions/workflows/ci.yml/badge.svg)](https://github.com/edbratt/processing-orchestra/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A multi-user web-based controller for Processing.org visual sketches. Multiple users can connect via web browsers, interact with UI controls (touch areas, sliders, buttons), and stream audio - all aggregated in real-time on a server-side Processing canvas.
+A multi-user web-based controller for Processing.org visual sketches. Multiple users can connect via web browsers, interact with UI controls (touch areas, sliders, buttons), stream audio, and use phone motion sensors, all aggregated in real-time on a server-side Processing canvas.
+
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Browser UI](#browser-ui)
+- [API Endpoints](#api-endpoints)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Architecture](#architecture)
+- [Customization](#customization)
+- [Next Steps](#next-steps)
+- [Technology Stack](#technology-stack)
+- [Acknowledgments](#acknowledgments)
 
 ## Features
 
@@ -11,10 +28,16 @@ A multi-user web-based controller for Processing.org visual sketches. Multiple u
 - **Real-time WebSocket communication**: Low-latency bidirectional messaging
 - **Touch/mouse input**: Position tracking with visual feedback
 - **Audio streaming**: Per-user audio level visualization
+- **Phone motion input**: Tilt and shake from supported mobile browsers over HTTPS
 - **HTTPS/TLS**: Secure connections required for mobile microphone access
 - **Cross-device**: Works on desktop and mobile browsers
 
 ## Prerequisites
+
+Contents:
+- [Required Software](#required-software)
+- [Environment Setup](#environment-setup)
+- [Verify Prerequisites](#verify-prerequisites)
 
 ### Required Software
 
@@ -54,6 +77,14 @@ echo $JAVA_HOME
 ```
 
 ## Getting Started
+
+Contents:
+- [1. Clone the Repository](#1-clone-the-repository)
+- [2. Try It Locally Over HTTP](#2-try-it-locally-over-http)
+- [3. Enable HTTPS for LAN or Mobile Browsers](#3-enable-https-for-lan-or-mobile-browsers)
+- [4. Build the Project](#4-build-the-project)
+- [5. Run the Server](#5-run-the-server)
+- [6. Access the Application](#6-access-the-application)
 
 ### 1. Clone the Repository
 
@@ -262,21 +293,25 @@ processing-server/
 |           |-- application.yaml      # Default local HTTP configuration
 |           `-- static/
 |               `-- index.html        # Browser UI
-`-- target/
-    |-- classes/                      # Compiled Java classes
-    `-- libs/                         # Dependency JARs
+`-- target/                           # Build output created after the first Maven build
 ```
 
 `target/` is created by Maven after the first build. It is not part of the files cloned from GitHub.
 
 ## Configuration
 
+Contents:
+- [application.yaml](#applicationyaml)
+- [Motion Configuration](#motion-configuration)
+- [Changing the Port](#changing-the-port)
+- [Changing Audio Quality](#changing-audio-quality)
+
 ### application.yaml
 
 ```yaml
 server:
   port: 8080                        # HTTP port
-  host: "0.0.0.0"                   # Bind all interfaces
+  host: "127.0.0.1"                 # Local-only HTTP listener
 
 processing:
   width: 800                        # Canvas width
@@ -305,6 +340,42 @@ debug:
   logging: false                    # Enable debug output
 ```
 
+### Motion Configuration
+
+Phone motion input is configured in `src/main/resources/application.yaml`:
+
+```yaml
+motion:
+  update-hz: 20
+  clamp:
+    alpha-degrees: 180
+    beta-degrees: 60
+    gamma-degrees: 60
+    acceleration-g: 3.0
+    magnitude-g: 4.0
+  mapping:
+    tilt-offset-normalized: 0.12
+    shake-threshold-g: 0.6
+    shake-burst-scale: 1.8
+  debug:
+    logging: false
+    sample-limit: 5
+```
+
+Adjustable motion settings:
+- `motion.update-hz`: browser send rate for combined motion samples
+- `motion.clamp.beta-degrees` and `motion.clamp.gamma-degrees`: max tilt accepted by the server
+- `motion.clamp.acceleration-g`: max absolute acceleration retained per axis
+- `motion.clamp.magnitude-g`: max retained acceleration magnitude
+- `motion.mapping.tilt-offset-normalized`: how far tilt can offset the rendered position around the touch target
+- `motion.mapping.shake-threshold-g`: minimum shake signal before a burst is triggered
+- `motion.mapping.shake-burst-scale`: scales the shake-driven burst intensity
+- `motion.debug.logging`: enables a few motion debug samples in the server/sketch
+
+Important:
+- this file is packaged into the jar
+- changing these values requires a rebuild with `mvn clean package -DskipTests`
+
 ### Changing the Port
 
 Edit `application.yaml` or pass system property:
@@ -330,6 +401,9 @@ audio:
 
 ## Browser UI
 
+Contents:
+- [Enabling Debug Mode](#enabling-debug-mode)
+
 The web interface (`index.html`) provides:
 
 1. **Touch Area**: Drag to move your circle on the canvas
@@ -338,6 +412,12 @@ The web interface (`index.html`) provides:
 4. **Action Buttons**: `Burst`, `Spin Color`, and `Scatter` trigger visual effects
 5. **Audio Input**: Start or stop microphone audio (HTTPS is required for mobile and remote browsers)
 6. **Audio Gain Slider**: Attenuate or amplify how strongly incoming audio drives the sketch
+7. **Motion Input**: Enable phone motion sensors, view live tilt values, and send tilt/shake control over HTTPS
+8. **Motion Trim Slider**: Adjust motion sensitivity in the browser before motion samples are sent to the server
+
+The touch area uses `touch-action: none`, which helps avoid accidental browser text selection or gesture interference while dragging.
+
+The motion trim is a client-only setting. It scales the browser's outgoing motion sample before transmission, so different devices can feel less or more responsive without changing the shared server config.
 
 ### Enabling Debug Mode
 
@@ -351,6 +431,10 @@ This enables console logging in the browser.
 
 ## API Endpoints
 
+Contents:
+- [REST Endpoints](#rest-endpoints)
+- [WebSocket Endpoint](#websocket-endpoint)
+
 ### REST Endpoints
 
 | Method | Endpoint | Description |
@@ -363,7 +447,7 @@ This enables console logging in the browser.
 
 Connect to `ws://localhost:8080/ws` for local HTTP, or `wss://localhost:8443/ws` when launched with `-Dapp.config=config/application-https.yaml`.
 
-**Server â†’ Client Messages:**
+**Server -> Client Messages:**
 
 ```json
 {
@@ -379,7 +463,7 @@ Connect to `ws://localhost:8080/ws` for local HTTP, or `wss://localhost:8443/ws`
 }
 ```
 
-**Client â†’ Server Messages:**
+**Client -> Server Messages:**
 
 ```json
 {
@@ -400,9 +484,37 @@ Connect to `ws://localhost:8080/ws` for local HTTP, or `wss://localhost:8443/ws`
 }
 ```
 
+```json
+{
+  "type": "motion",
+  "controlId": "deviceMotion",
+  "alpha": 12.0,
+  "beta": -8.5,
+  "gamma": 24.0,
+  "ax": 0.1,
+  "ay": 0.4,
+  "az": 1.0,
+  "magnitude": 1.08,
+  "timestamp": 1234567890
+}
+```
+
 **Audio is sent as binary WebSocket frames** (not JSON).
 
 ## Troubleshooting
+
+Contents:
+- ["Port already in use"](#port-already-in-use)
+- ["SSL handshake failure" / "Can't connect"](#ssl-handshake-failure--cant-connect)
+- ["Session ID: connecting..." or controls do nothing](#session-id-connecting-or-controls-do-nothing)
+- ["The browser says the server disconnected"](#the-browser-says-the-server-disconnected)
+- ["Microphone not working on mobile"](#microphone-not-working-on-mobile)
+- ["Motion works, but shake is weak or invisible"](#motion-works-but-shake-is-weak-or-invisible)
+- ["Audio not streaming"](#audio-not-streaming)
+- ["Users initialize on same position"](#users-initialize-on-same-position)
+- ["Java version errors"](#java-version-errors)
+- ["Maven not found"](#maven-not-found)
+- ["IP address changed / certificate invalid"](#ip-address-changed--certificate-invalid)
 
 ### "Port already in use"
 
@@ -474,6 +586,20 @@ If curl fails with SSL error, the keystore is malformed. Regenerate with `create
 - Local `http://localhost:8080` works on the same machine but not for mobile microphone access
 - Must accept certificate warning
 - Browser requires user gesture before microphone access
+
+### "Motion works, but shake is weak or invisible"
+
+- Motion tuning in `src/main/resources/application.yaml` requires a rebuild
+- Restart after `mvn clean package -DskipTests`
+- Try lowering `motion.mapping.shake-threshold-g`
+- Try raising `motion.mapping.shake-burst-scale`
+- Enable `motion.debug.logging: true` to inspect sample values
+
+The current shake effect is driven by:
+- acceleration magnitude change
+- axis-to-axis acceleration change
+
+So short sharp shakes should produce a stronger burst than slow movement.
 
 ### "Audio not streaming"
 
@@ -557,6 +683,11 @@ The keystore certificate includes your local IP address in the Subject Alternati
    Requires a registered domain and DNS pointing to your server.
 
 ## Development
+
+Contents:
+- [Building Without Running Tests](#building-without-running-tests)
+- [Running Tests](#running-tests)
+- [Debug Logging](#debug-logging)
 
 ### Building Without Running Tests
 
@@ -643,4 +774,5 @@ Now that you have the server running:
 - [Processing Foundation](https://processing.org/) - Visual arts programming
 - [Helidon](https://helidon.io/) - Lightweight Java web framework
 - [Oracle](https://www.oracle.com/java/) - Java Development Kit
+
 

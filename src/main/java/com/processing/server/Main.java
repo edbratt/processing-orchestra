@@ -32,6 +32,7 @@ public final class Main {
         SessionManager sessionManager = new SessionManager();
 
         AudioConfig audioConfig = loadAudioConfig(config);
+        MotionConfig motionConfig = loadMotionConfig(config);
         AudioBuffer audioBuffer = new AudioBuffer(
             config.get("audio.max-buffer-chunks").asInt().orElse(100),
             audioConfig.getSampleRate(),
@@ -45,7 +46,7 @@ public final class Main {
         int width = config.get("processing.width").asInt().orElse(800);
         int height = config.get("processing.height").asInt().orElse(600);
 
-        ProcessingSketch sketch = new ProcessingSketch(eventQueue, audioBuffer, width, height, debugConfig);
+        ProcessingSketch sketch = new ProcessingSketch(eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
         sketch.runSketch();
 
         InputService inputService = new InputService(sessionManager, eventQueue, audioBuffer);
@@ -55,14 +56,14 @@ public final class Main {
             .config(config.get("server"))
             .routing(builder -> routing(builder, inputService))
             .addRouting(WsRouting.builder().endpoint("/ws",
-                () -> new WebSocketHandler(sessionManager, eventQueue, audioBuffer, audioConfig.getBufferSize(), debugConfig)));
+                () -> new WebSocketHandler(sessionManager, eventQueue, audioBuffer, audioConfig.getBufferSize(), debugConfig, motionConfig)));
 
         if (config.get("server.sockets." + TLS_SOCKET_NAME).exists()) {
             serverBuilder.routing(TLS_SOCKET_NAME, builder -> routing(builder, inputService))
                 .putSocket(TLS_SOCKET_NAME, socket -> socket
                     .config(config.get("server.sockets." + TLS_SOCKET_NAME))
                     .addRouting(WsRouting.builder().endpoint("/ws",
-                        () -> new WebSocketHandler(sessionManager, eventQueue, audioBuffer, audioConfig.getBufferSize(), debugConfig))));
+                        () -> new WebSocketHandler(sessionManager, eventQueue, audioBuffer, audioConfig.getBufferSize(), debugConfig, motionConfig))));
         }
 
         WebServer server = serverBuilder.build().start();
@@ -81,6 +82,10 @@ public final class Main {
         System.out.println("Audio config: " + audioConfig.getSampleRate() + "Hz, "
                 + audioConfig.getChannels() + " channel(s), buffer "
                 + audioConfig.getBufferSize() + " samples - " + audioConfig.getDescription());
+        System.out.println("Motion config: " + motionConfig.getUpdateHz() + "Hz, clamp beta "
+                + motionConfig.getBetaClampDegrees() + "°, gamma "
+                + motionConfig.getGammaClampDegrees() + "°, magnitude "
+                + motionConfig.getMagnitudeClampG() + "g");
         System.out.println("Debug logging: " + (debugConfig.isLogging() ? "enabled" : "disabled"));
     }
 
@@ -109,6 +114,22 @@ public final class Main {
         String description = config.get(basePath + ".description").asString().orElse(mode);
 
         return new AudioConfig(sampleRate, channels, bufferSize, description);
+    }
+
+    private static MotionConfig loadMotionConfig(Config config) {
+        return new MotionConfig(
+            config.get("motion.update-hz").asInt().orElse(20),
+            config.get("motion.clamp.alpha-degrees").asDouble().orElse(180.0).floatValue(),
+            config.get("motion.clamp.beta-degrees").asDouble().orElse(60.0).floatValue(),
+            config.get("motion.clamp.gamma-degrees").asDouble().orElse(60.0).floatValue(),
+            config.get("motion.clamp.acceleration-g").asDouble().orElse(3.0).floatValue(),
+            config.get("motion.clamp.magnitude-g").asDouble().orElse(4.0).floatValue(),
+            config.get("motion.mapping.tilt-offset-normalized").asDouble().orElse(0.12).floatValue(),
+            config.get("motion.mapping.shake-threshold-g").asDouble().orElse(0.6).floatValue(),
+            config.get("motion.mapping.shake-burst-scale").asDouble().orElse(1.8).floatValue(),
+            config.get("motion.debug.logging").asBoolean().orElse(false),
+            config.get("motion.debug.sample-limit").asInt().orElse(5)
+        );
     }
 
     static void routing(HttpRouting.Builder builder, InputService inputService) {

@@ -4,18 +4,28 @@ This guide explains how to customize the Processing Server for your own visual s
 
 ## Table of Contents
 
-1. [Quick Start: Basic Customizations](#quick-start-basic-customizations)
-2. [Configuration Changes](#configuration-changes)
-3. [Customizing the Browser UI](#customizing-the-browser-ui)
-4. [Creating Your Own Processing Sketch](#creating-your-own-processing-sketch)
-5. [Using Audio Data in Your Sketch](#using-audio-data-in-your-sketch)
-6. [Adding New Event Types](#adding-new-event-types)
-7. [Complete Example: Building a Particle System](#complete-example-building-a-particle-system)
-8. [Using AI Coding Assistants](#using-ai-coding-assistants)
+- [Quick Start: Basic Customizations](#quick-start-basic-customizations)
+- [Configuration Changes](#configuration-changes)
+- [Customizing the Browser UI](#customizing-the-browser-ui)
+- [Creating Your Own Processing Sketch](#creating-your-own-processing-sketch)
+- [Using Audio Data in Your Sketch](#using-audio-data-in-your-sketch)
+- [Using Motion Data In Your Sketch](#using-motion-data-in-your-sketch)
+- [Adding New Event Types](#adding-new-event-types)
+- [Complete Example: Building a Particle System](#complete-example-building-a-particle-system)
+- [Using AI Coding Assistants](#using-ai-coding-assistants)
+- [Testing Your Customizations](#testing-your-customizations)
+- [Troubleshooting](#troubleshooting)
+- [Resources](#resources)
+- [License](#license)
 
 ---
 
 ## Quick Start: Basic Customizations
+
+Contents:
+- [Change Canvas Size](#change-canvas-size)
+- [Change Audio Quality](#change-audio-quality)
+- [Change Port or Host](#change-port-or-host)
 
 ### Change Canvas Size
 
@@ -56,6 +66,12 @@ server:
 ---
 
 ## Configuration Changes
+
+Contents:
+- [application.yaml](#applicationyaml)
+- [Change Motion Behavior](#change-motion-behavior)
+- [Motion Trim In The Browser](#motion-trim-in-the-browser)
+- [Debug Mode](#debug-mode)
 
 ### application.yaml
 
@@ -99,6 +115,55 @@ debug:
   logging: false
 ```
 
+### Change Motion Behavior
+
+Edit `src/main/resources/application.yaml`:
+
+```yaml
+motion:
+  update-hz: 20
+  clamp:
+    beta-degrees: 60
+    gamma-degrees: 60
+    acceleration-g: 3.0
+    magnitude-g: 4.0
+  mapping:
+    tilt-offset-normalized: 0.12
+    shake-threshold-g: 0.6
+    shake-burst-scale: 1.8
+  debug:
+    logging: false
+    sample-limit: 5
+```
+
+What these do:
+- `motion.update-hz`: how often the browser sends a combined motion sample
+- `motion.clamp.beta-degrees` and `motion.clamp.gamma-degrees`: max accepted tilt
+- `motion.clamp.acceleration-g`: max accepted per-axis acceleration
+- `motion.clamp.magnitude-g`: max accepted total acceleration magnitude
+- `motion.mapping.tilt-offset-normalized`: how far tilt can move the rendered object around its touch target
+- `motion.mapping.shake-threshold-g`: minimum shake signal before triggering a burst
+- `motion.mapping.shake-burst-scale`: scales the burst strength caused by shake
+- `motion.debug.logging`: prints a few motion debug samples
+
+Important:
+- because `application.yaml` is packaged into the jar, changing these values requires a rebuild
+
+### Motion Trim In The Browser
+
+The browser UI also includes a `Motion Trim` slider.
+
+What it does:
+- scales outgoing motion samples before they are sent to the server
+- affects both tilt and shake responsiveness
+- is local to that browser/client only
+
+Why it matters:
+- lets each phone feel more or less sensitive without changing the shared server-side motion config
+- does not require a rebuild
+
+This trim is implemented in `src/main/resources/static/index.html`, not in `application.yaml`.
+
 ### Debug Mode
 
 Enable debug logging to see what's happening:
@@ -117,6 +182,10 @@ http://localhost:8080/?debug
 ---
 
 ## Customizing the Browser UI
+
+Contents:
+- [Location](#location)
+- [Key Sections to Modify](#key-sections-to-modify)
 
 ### Location
 
@@ -194,6 +263,13 @@ Find the touch area in CSS:
 
 ## Creating Your Own Processing Sketch
 
+Contents:
+- [Location](#location-1)
+- [What to Preserve](#what-to-preserve)
+- [Minimal Custom Sketch Template](#minimal-custom-sketch-template)
+- [Event Types Available](#event-types-available)
+- [Processing Methods You Can Override](#processing-methods-you-can-override)
+
 ### Location
 
 The Processing sketch is `src/main/java/com/processing/server/ProcessingSketch.java`.
@@ -202,7 +278,7 @@ The Processing sketch is `src/main/java/com/processing/server/ProcessingSketch.j
 
 You need to keep:
 
-1. **Constructor signature** - Accepts `EventQueue`, `AudioBuffer`, width, height, `DebugConfig`
+1. **Constructor signature** - Accepts `EventQueue`, `AudioBuffer`, width, height, `DebugConfig`, and `MotionConfig`
 2. **The `runSketch()` method** - Starts the Processing thread
 3. **The main `draw()` loop** - But you can modify it heavily
 
@@ -221,16 +297,19 @@ public class ProcessingSketch extends PApplet {
     private final int sketchWidth;
     private final int sketchHeight;
     private final DebugConfig debugConfig;
+    private final MotionConfig motionConfig;
     
     private final Map<String, float[]> userPositions = new HashMap<>();
     
-    public ProcessingSketch(EventQueue eventQueue, AudioBuffer audioBuffer, 
-                           int width, int height, DebugConfig debugConfig) {
+    public ProcessingSketch(EventQueue eventQueue, AudioBuffer audioBuffer,
+                           int width, int height, DebugConfig debugConfig,
+                           MotionConfig motionConfig) {
         this.eventQueue = eventQueue;
         this.audioBuffer = audioBuffer;
         this.sketchWidth = width;
         this.sketchHeight = height;
         this.debugConfig = debugConfig;
+        this.motionConfig = motionConfig;
     }
 
     @Override
@@ -260,10 +339,14 @@ public class ProcessingSketch extends PApplet {
             
             switch (event.eventType()) {
                 case "touch" -> {
+                    // Handle touch events here
                     userPositions.computeIfAbsent(sessionId, k -> new float[]{0.5f, 0.5f});
                     float[] pos = userPositions.get(sessionId);
                     pos[0] = event.x();
                     pos[1] = event.y();
+                }
+                case "motion" -> {
+                    // Handle motion events here
                 }
                 // Add more event types here
             }
@@ -296,6 +379,7 @@ public class ProcessingSketch extends PApplet {
 | `touch` | `x`, `y` (0-1 normalized) | Touch/mouse position |
 | `slider` | `controlId`, `value` (0-1) | Slider value change |
 | `button` | `controlId` | Button clicked |
+| `motion` | `alpha`, `beta`, `gamma`, `ax`, `ay`, `az`, `magnitude` | Phone tilt and shake sample |
 | `color` | `controlId`, `value` (packed RGB) | Color picker change |
 | `audio` | Binary WebSocket frame | PCM audio samples |
 
@@ -347,6 +431,12 @@ public void exit() {
 ---
 
 ## Using Audio Data in Your Sketch
+
+Contents:
+- [How Audio Works](#how-audio-works)
+- [Calculating Audio Level](#calculating-audio-level)
+- [Example: Audio-Reactive Circle](#example-audio-reactive-circle)
+- [Example: Global Audio Visualizer](#example-global-audio-visualizer)
 
 ### How Audio Works
 
@@ -450,7 +540,104 @@ private void drawGlobalAudio() {
 
 ---
 
+## Using Motion Data In Your Sketch
+
+Contents:
+- [How Motion Works](#how-motion-works)
+- [Where Motion Is Handled In ProcessingSketch.java](#where-motion-is-handled-in-processingsketchjava)
+- [Current Motion Mapping](#current-motion-mapping)
+- [Example: Replace Tilt Positioning With Color Control](#example-replace-tilt-positioning-with-color-control)
+- [Example: Replace Shake Burst With Scatter](#example-replace-shake-burst-with-scatter)
+- [Practical Advice](#practical-advice)
+
+### How Motion Works
+
+1. Supported phone browsers collect orientation and acceleration data.
+2. The browser combines those sensor values into one `motion` JSON message at `motion.update-hz`.
+3. `WebSocketHandler.java` clamps the values and converts them into a `UserInputEvent`.
+4. `ProcessingSketch.processEvents()` routes `eventType == "motion"` into `handleMotionEvent()`.
+5. The sketch stores per-session motion state and uses it during drawing.
+
+### Where Motion Is Handled In ProcessingSketch.java
+
+The current sketch handles motion in three main places:
+
+1. In `handleEvent(UserInputEvent event)`:
+```java
+case "motion" -> {
+    if (!userPositions.containsKey(sessionId)) {
+        initializeUser(sessionId);
+    }
+    handleMotionEvent(sessionId, event);
+}
+```
+
+2. In `handleMotionEvent(String sessionId, UserInputEvent event)`:
+- stores the latest per-session orientation and acceleration sample
+- computes shake intensity
+- converts shake into pulse/hue energy
+
+3. In `drawUsers()`:
+- reads the stored `userMotion` values
+- converts `beta`/`gamma` tilt into a bounded offset around the touch target
+- renders the resulting circle position and burst ring
+
+### Current Motion Mapping
+
+The default sketch currently uses motion like this:
+- `gamma` tilt changes horizontal offset around the touch target
+- `beta` tilt changes vertical offset around the touch target
+- shake intensity increases the burst pulse on the outer ring
+- stronger shake creates a stronger pulse
+
+### Example: Replace Tilt Positioning With Color Control
+
+If you want phone tilt to change color instead of position, the best place to modify is `drawUsers()`:
+
+```java
+float[] motion = userMotion.getOrDefault(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
+float gammaHueShift = map(
+    motion[2],
+    -motionConfig.getGammaClampDegrees(),
+    motionConfig.getGammaClampDegrees(),
+    -40f,
+    40f
+);
+color[0] = (color[0] + gammaHueShift + 360) % 360;
+```
+
+### Example: Replace Shake Burst With Scatter
+
+If you want shake to move the object instead of pulsing the ring, change `handleMotionEvent()`:
+
+```java
+if (shakeIntensity > 0f) {
+    float[] target = userTargetPositions.get(sessionId);
+    target[0] = random(0.1f, 0.9f);
+    target[1] = random(0.15f, 0.85f);
+}
+```
+
+### Practical Advice
+
+- keep touch as the primary position input unless you explicitly want motion-only control
+- use tilt as an additive modifier rather than a replacement when possible
+- use shake for short-lived effects, not continuous state
+- if motion feels too subtle, first adjust config before rewriting sketch logic
+
+The most useful motion tuning settings are:
+- `motion.mapping.tilt-offset-normalized`
+- `motion.mapping.shake-threshold-g`
+- `motion.mapping.shake-burst-scale`
+
+---
+
 ## Adding New Event Types
+
+Contents:
+- [Step 1: Add UI in Browser](#step-1-add-ui-in-browser)
+- [Step 2: Handle in ProcessingSketch.java](#step-2-handle-in-processingsketchjava)
+- [Step 3: Draw the Effect](#step-3-draw-the-effect)
 
 ### Step 1: Add UI in Browser
 
@@ -522,6 +709,11 @@ private void drawUsers() {
 ---
 
 ## Complete Example: Building a Particle System
+
+Contents:
+- [Step 1: Create Particle.java](#step-1-create-particlejava)
+- [Step 2: Replace ProcessingSketch.java](#step-2-replace-processingsketchjava)
+- [Step 3: Build and Run](#step-3-build-and-run)
 
 Let's create a complete custom sketch with particle trails and audio-reactive visuals.
 
@@ -840,6 +1032,13 @@ mvn clean package -DskipTests
 
 ## Using AI Coding Assistants
 
+Contents:
+- [Give Context About the Project](#give-context-about-the-project)
+- [Example Prompts](#example-prompts)
+- [Best Practices with AI Assistants](#best-practices-with-ai-assistants)
+- [Common Issues AI Can Help With](#common-issues-ai-can-help-with)
+- [Code Review Prompt](#code-review-prompt)
+
 AI coding assistants (like Cursor, GitHub Copilot, ChatGPT, Claude) can significantly speed up customization. Here's how to use them effectively.
 
 ### Give Context About the Project
@@ -974,6 +1173,11 @@ Here's the changed code: [paste]
 
 ## Testing Your Customizations
 
+Contents:
+- [Local Testing](#local-testing)
+- [Mobile Testing](#mobile-testing)
+- [Performance Testing](#performance-testing)
+
 ### Local Testing
 
 1. **Start the server:**
@@ -1044,6 +1248,13 @@ public void draw() {
 
 ## Troubleshooting
 
+Contents:
+- [Sketch Doesn't Start](#sketch-doesnt-start)
+- [Events Not Received](#events-not-received)
+- [Audio Not Working](#audio-not-working)
+- [Low Frame Rate](#low-frame-rate)
+- [Users Overlapping](#users-overlapping)
+
 ### Sketch Doesn't Start
 
 **Symptom:** Processing window doesn't open or closes immediately.
@@ -1097,6 +1308,12 @@ public void draw() {
 ---
 
 ## Resources
+
+Contents:
+- [Processing Documentation](#processing-documentation)
+- [Helidon Documentation](#helidon-documentation)
+- [Audio Processing](#audio-processing)
+- [WebSocket](#websocket)
 
 ### Processing Documentation
 - [Processing Reference](https://processing.org/reference/)

@@ -4,21 +4,15 @@
  */
 package com.processing.server;
 
-import java.util.Collections;
-
 import io.helidon.http.Status;
+import io.helidon.json.JsonObject;
+import io.helidon.json.JsonValue;
 import io.helidon.webserver.http.HttpRules;
 import io.helidon.webserver.http.HttpService;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
 
-import jakarta.json.Json;
-import jakarta.json.JsonBuilderFactory;
-import jakarta.json.JsonObject;
-
 public class InputService implements HttpService {
-    private static final JsonBuilderFactory JSON = Json.createBuilderFactory(Collections.emptyMap());
-    
     private final SessionManager sessionManager;
     private final EventQueue eventQueue;
     private final AudioBuffer audioBuffer;
@@ -49,10 +43,12 @@ public class InputService implements HttpService {
         UserInputEvent event = UserInputEvent.fromJson(json);
         if (sessionManager.isActive(event.sessionId())) {
             eventQueue.push(event);
-            res.status(Status.OK_200).send("{\"status\":\"accepted\"}");
+            res.status(Status.OK_200).send(JsonValue.objectBuilder()
+                .set("status", "accepted")
+                .build());
         } else {
-            JsonObject error = JSON.createObjectBuilder()
-                .add("error", "invalid session")
+            JsonObject error = JsonValue.objectBuilder()
+                .set("error", "invalid session")
                 .build();
             res.status(Status.UNAUTHORIZED_401).send(error);
         }
@@ -60,8 +56,8 @@ public class InputService implements HttpService {
 
     private void createSession(ServerRequest req, ServerResponse res) {
         String sessionId = sessionManager.createSession();
-        JsonObject result = JSON.createObjectBuilder()
-            .add("sessionId", sessionId)
+        JsonObject result = JsonValue.objectBuilder()
+            .set("sessionId", sessionId)
             .build();
         res.status(Status.CREATED_201).send(result);
     }
@@ -77,14 +73,14 @@ public class InputService implements HttpService {
     }
 
     private void getStatus(ServerRequest req, ServerResponse res) {
-        var builder = JSON.createObjectBuilder()
-            .add("activeSessions", sessionManager.getActiveSessionCount())
-            .add("queueSize", eventQueue.size());
+        var builder = JsonValue.objectBuilder()
+            .set("activeSessions", sessionManager.getActiveSessionCount())
+            .set("queueSize", eventQueue.size());
         
         if (audioBuffer != null) {
-            builder.add("audioStreams", audioBuffer.getActiveSessionCount())
-                   .add("audioSampleRate", audioBuffer.getSampleRate())
-                   .add("audioChannels", audioBuffer.getChannels());
+            builder.set("audioStreams", audioBuffer.getActiveSessionCount())
+                   .set("audioSampleRate", audioBuffer.getSampleRate())
+                   .set("audioChannels", audioBuffer.getChannels());
         }
         
         res.status(Status.OK_200).send(builder.build());

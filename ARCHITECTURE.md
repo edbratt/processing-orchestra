@@ -4,6 +4,20 @@
 
 This application is a multi-user web controller for a Processing sketch running on the server machine. Browser clients connect to a Helidon application, interact with touch areas, sliders, and buttons, optionally stream microphone audio, and the server combines those inputs into one shared Processing canvas.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture Diagram](#architecture-diagram)
+- [Data Flow](#data-flow)
+- [Configuration](#configuration)
+- [Components](#components)
+- [Data Flow Summary](#data-flow-summary)
+- [Threading Model](#threading-model)
+- [How to Extend](#how-to-extend)
+- [HTTPS/TLS Configuration](#httpstls-configuration)
+- [Running the Application](#running-the-application)
+- [File Structure](#file-structure)
+
 ## Architecture Diagram
 
 This diagram shows the major runtime components and their structural relationships.
@@ -16,14 +30,16 @@ flowchart LR
         Sliders["Sliders"]
         Buttons["Buttons"]
         Audio["Microphone Capture"]
+        Motion["Phone Motion Sensors"]
         UI --> Touch
         UI --> Sliders
         UI --> Buttons
         UI --> Audio
+        UI --> Motion
     end
 
     subgraph Channel["WebSocket Channel /ws"]
-        ControlStream["JSON control stream<br/>touch / sliders / buttons"]
+        ControlStream["JSON control stream<br/>touch / sliders / buttons / motion"]
         AudioStream["Binary audio stream<br/>PCM audio frames"]
     end
 
@@ -47,13 +63,14 @@ flowchart LR
     Touch --> ControlStream
     Sliders --> ControlStream
     Buttons --> ControlStream
+    Motion --> ControlStream
     Audio --> AudioStream
     ControlStream --> WSH
     AudioStream --> WSH
 ```
 
 Key details:
-- The browser UI is served from `index.html` and exposes touch input, sliders, buttons, and microphone capture.
+- The browser UI is served from `index.html` and exposes touch input, sliders, buttons, microphone capture, and optional phone motion sensors.
 - The browser uses one `/ws` connection, but that channel carries two logical streams in parallel: JSON control messages and binary audio frames.
 - `WebSocketHandler` separates those streams and forwards them to the correct server-side structures.
 - `ProcessingSketch` consumes the shared session, event, and audio state and renders the combined visual result.
@@ -63,6 +80,11 @@ Key details:
 ## Data Flow
 
 This section shows the detailed runtime path for control input and microphone audio.
+
+Contents:
+- [Touch/Slider/Button Events (JSON)](#touchsliderbutton-events-json)
+- [Motion Events (JSON)](#motion-events-json)
+- [Audio Stream (Binary)](#audio-stream-binary)
 
 ```mermaid
 flowchart TD
@@ -76,14 +98,18 @@ flowchart TD
 ```
 
 Key details:
-- Touch, slider, and button interactions are normalized in the browser before transmission.
-- JSON payloads identify the event type, control ID, normalized value, coordinates, and timestamp.
+- Touch, slider, button, and motion interactions are normalized in the browser before transmission.
+- JSON payloads identify the event type, control ID, normalized value or sensor fields, and timestamp.
 - `WebSocketHandler.onMessage()` parses the payload and creates a `UserInputEvent`.
 - `ProcessingSketch.draw()` drains the queue once per frame and updates visual state before rendering.
 
 ### Touch/Slider/Button Events (JSON)
 
 The browser normalizes touch or mouse coordinates to the `0.0` to `1.0` range, packages them with the control ID and timestamp, and sends them as JSON over the shared WebSocket. On the server side, `WebSocketHandler` parses that message into a `UserInputEvent` and pushes it into `EventQueue`, where it waits for the next `draw()` frame.
+
+### Motion Events (JSON)
+
+Phone motion data uses the same JSON channel. The browser keeps orientation and acceleration samples separately, then sends a combined `motion` event on a fixed interval. On the server side, `WebSocketHandler` clamps those values according to the motion config and pushes the event into `EventQueue`. In `ProcessingSketch`, `handleMotionEvent()` stores the per-session motion state, applies tilt as an offset around the touch target, and converts shake intensity into a burst-like pulse.
 
 ### Audio Stream (Binary)
 
@@ -108,6 +134,10 @@ Key details:
 ---
 
 ## Configuration
+
+Contents:
+- [Base Config: `src/main/resources/application.yaml`](#base-config-srcmainresourcesapplicationyaml)
+- [HTTPS Overlay: `config/application-https.yaml`](#https-overlay-configapplication-httpsyaml)
 
 ### Base Config: `src/main/resources/application.yaml`
 
@@ -134,6 +164,18 @@ audio:
   buffer-size: 2048
   max-buffer-chunks: 20
 
+motion:
+  update-hz: 20
+  clamp:
+    beta-degrees: 60
+    gamma-degrees: 60
+    acceleration-g: 3.0
+    magnitude-g: 4.0
+  mapping:
+    tilt-offset-normalized: 0.12
+    shake-threshold-g: 0.6
+    shake-burst-scale: 1.8
+
 debug:
   logging: false
 ```
@@ -148,6 +190,9 @@ debug:
 | `audio.mode` | Selects the sample rate/channel profile used by the audio pipeline |
 | `audio.buffer-size` | Sets the PCM chunk size used in the audio path |
 | `audio.max-buffer-chunks` | Caps queued audio per session so stale audio cannot grow unbounded |
+| `motion.update-hz` | Fixed send rate for combined browser motion samples |
+| `motion.clamp.*` | Bounds the accepted tilt and acceleration ranges |
+| `motion.mapping.*` | Controls how tilt and shake affect the sketch visuals |
 | `debug.logging` | Enables extra server-side logging for diagnostics |
 
 ### HTTPS Overlay: `config/application-https.yaml`
@@ -180,6 +225,16 @@ This keeps local HTTP simple while allowing the same packaged jar to expose HTTP
 ---
 
 ## Components
+
+Contents:
+- [1. Main.java - Application Entry Point](#1-mainjava---application-entry-point)
+- [2. SessionManager.java - Browser Session Registry](#2-sessionmanagerjava---browser-session-registry)
+- [3. EventQueue.java - Thread-Safe Event Buffer](#3-eventqueuejava---thread-safe-event-buffer)
+- [4. AudioBuffer.java - Per-Session Audio Queue](#4-audiobufferjava---per-session-audio-queue)
+- [5. WebSocketHandler.java - Real-Time Input Channel](#5-websockethandlerjava---real-time-input-channel)
+- [6. InputService.java - REST API Endpoints](#6-inputservicejava---rest-api-endpoints)
+- [7. ProcessingSketch.java - Visual Output and Interaction Model](#7-processingsketchjava---visual-output-and-interaction-model)
+- [8. index.html - Browser Client](#8-indexhtml---browser-client)
 
 ### 1. Main.java - Application Entry Point
 
@@ -232,13 +287,13 @@ Why it matters:
 Responsibilities:
 - Owns the `/ws` connection lifecycle.
 - Creates or associates the session for each connection.
-- Routes JSON control messages to `EventQueue`.
+- Routes JSON control and motion messages to `EventQueue`.
 - Routes binary audio frames to `AudioBuffer`.
 - Broadcasts shutdown notices and cleans up sessions on close or error.
 
 Transport model:
 - Each browser uses one persistent `/ws` connection.
-- Text frames carry JSON control messages for touch, sliders, buttons, and client-side state updates.
+- Text frames carry JSON control messages for touch, sliders, buttons, motion samples, and client-side state updates.
 - Binary frames carry raw PCM audio captured from the browser microphone path.
 - The handler keeps session cleanup and disconnect behavior in one place so the sketch does not have to reason about socket lifecycle directly.
 
@@ -271,10 +326,13 @@ Event semantics:
 - Touch and drag events update target positions rather than snapping immediately to the current draw position.
 - The speed slider controls how quickly circles move toward those targets and how fast temporary effects decay.
 - Buttons trigger short-lived visual behaviors such as burst, spin color, and scatter.
+- Motion events are handled in `handleMotionEvent()`, where tilt is stored as per-session motion state and shake intensity is converted into a pulse boost.
 
 Visual model details:
 - Each session owns a core circle plus an outer audio-reactive ring.
 - The size slider changes the core circle size, and the outer ring scales proportionally from that base.
+- Tilt is applied as a bounded offset around the touch target, so motion layers on top of the existing spatial interaction model.
+- Shake uses both acceleration magnitude change and axis-to-axis acceleration change to drive a stronger burst effect.
 - All sketch-owned state is mutated on the Processing animation thread so drawing stays deterministic.
 
 ### 8. index.html - Browser Client
@@ -282,7 +340,7 @@ Visual model details:
 Responsibilities:
 - Renders the control UI and status text.
 - Opens the shared WebSocket connection and reconnects when needed.
-- Captures pointer, slider, button, and microphone input.
+- Captures pointer, slider, button, microphone, and motion input.
 - Displays disconnect or shutdown banners when the server goes away.
 
 Connection details:
@@ -294,6 +352,8 @@ Control event details:
 - Touch and mouse positions are normalized before transmission so the sketch stays resolution-independent.
 - Slider values are sent as numeric updates keyed by control ID.
 - Button events are discrete JSON messages rather than long-lived state.
+- Motion uses browser orientation and acceleration events, combined on a fixed timer before being sent as a single `motion` message.
+- The browser-side `Motion Trim` slider scales the outgoing motion sample before transmission, so sensitivity can be adjusted per device without changing server config.
 
 #### Audio Capture
 
@@ -379,6 +439,11 @@ Key details:
 
 ## How to Extend
 
+Contents:
+- [Add a New Event Type](#add-a-new-event-type)
+- [Add a New REST Endpoint](#add-a-new-rest-endpoint)
+- [Stream Video Back to Clients](#stream-video-back-to-clients)
+
 ### Add a New Event Type
 
 1. Frontend in `index.html`:
@@ -433,6 +498,16 @@ That is intentionally outside the current architecture, which only sends control
 ---
 
 ## HTTPS/TLS Configuration
+
+Contents:
+- [Why HTTPS?](#why-https)
+- [Keystore Structure](#keystore-structure)
+- [Creating the Keystore](#creating-the-keystore)
+- [TLS Configuration in Code](#tls-configuration-in-code)
+- [Testing TLS](#testing-tls)
+- [Browser Certificate Warning](#browser-certificate-warning)
+- [Changing the IP Address](#changing-the-ip-address)
+- [Changing the Password](#changing-the-password)
 
 The server uses HTTPS to enable secure WebSocket connections (`wss://`), which are required for browser microphone access from mobile devices and remote clients.
 
@@ -520,6 +595,13 @@ If you change the keystore password, update:
 ---
 
 ## Running the Application
+
+Contents:
+- [Prerequisites](#prerequisites)
+- [Build](#build)
+- [Run](#run)
+- [Packaging Tradeoff](#packaging-tradeoff)
+- [Access](#access)
 
 ### Prerequisites
 

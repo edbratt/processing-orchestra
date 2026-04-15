@@ -25,3 +25,5 @@ Temporary/testing artifacts
 io/
 pom_helidon.xml
 *.tmp
+.codex*
+.tmp-*/

@@ -12,13 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Browser disconnect and clean shutdown notifications, including a final `server-shutdown` WebSocket message.
 - Audio gain control in the browser UI and sketch processing path.
 - Additional sketch controls and effects for `Burst`, `Spin Color`, and `Scatter`.
+- Phone motion input over WebSocket, including tilt, shake, and browser-side motion trim controls.
+- New handoff and teaching docs in `HANDOFF.md`, `MOTION_INPUT_PLAN.md`, and `RUNTIME_OVERVIEW.md`.
 
 ### Changed
 - Build packaging now produces an executable shaded jar for `java -jar`.
 - Default `application.yaml` now starts local HTTP only; HTTPS is enabled through the overlay config instead of manual YAML edits.
 - TLS keystore generation now writes `keystore.p12` to the project root so HTTPS certificates can be regenerated without rebuilding.
 - Run scripts now discover the newest packaged jar automatically.
-- Documentation was updated to reflect the HTTP/HTTPS launch split, external keystore workflow, and current UI behavior.
+- Documentation was updated to reflect the HTTP/HTTPS launch split, external keystore workflow, current UI behavior, and new table-of-contents navigation in the main guides.
 
 ### Fixed
 - WebSocket handling now uses a dedicated handler per connection.

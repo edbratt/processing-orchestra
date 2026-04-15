@@ -235,6 +235,30 @@
                     Use <code>http://localhost:8080</code> on this machine, or configure HTTPS.
                 </div>
             </div>
+
+            <div class="control-group">
+                <label>Motion Input</label>
+                <div class="audio-status">
+                    <div class="audio-indicator" id="motionIndicator"></div>
+                    <span id="motionStatusText">Checking support...</span>
+                </div>
+                <div class="buttons">
+                    <button id="btnStartMotion">Enable Motion</button>
+                    <button id="btnStopMotion" disabled>Stop Motion</button>
+                </div>
+                <div style="margin-top: 10px; font-size: 11px; color: #888;">
+                    <span id="motionDetails">Orientation sensor status unavailable.</span>
+                </div>
+                <div style="margin-top: 12px;">
+                    <label>Motion Trim: <span id="motionTrimValue">1.0x</span></label>
+                    <input type="range" id="motionTrimSlider" min="0" max="100" value="50">
+                </div>
+                <div style="margin-top: 10px; font-size: 12px; color: #bbb;">
+                    <div>Beta: <span id="motionBetaValue">-</span></div>
+                    <div>Gamma: <span id="motionGammaValue">-</span></div>
+                    <div>Magnitude: <span id="motionMagnitudeValue">-</span></div>
+                </div>
+            </div>
         </div>
         
         <div class="status">
@@ -260,6 +284,23 @@
         let audioIntervalId = null;
         let debugLogging = false; // Set to true to enable console logging
         let shutdownNoticeReceived = false;
+        let motionEnabled = false;
+        let motionSupported = false;
+        let motionPermissionRequired = false;
+        let motionPermissionGranted = false;
+        let motionUpdateHz = 20;
+        let motionUpdateIntervalMs = 50;
+        let motionTimerId = null;
+        let motionClamp = {
+            alpha: 180,
+            beta: 60,
+            gamma: 60,
+            acceleration: 3,
+            magnitude: 4
+        };
+        let motionTrim = 1.0;
+        let latestOrientationSample = null;
+        let latestAccelerationSample = null;
         
         // Check URL parameters for debug mode
         if (new URLSearchParams(window.location.search).has('debug')) {
@@ -282,6 +323,12 @@
                 return '0 dB';
             }
             return `${db > 0 ? '+' : ''}${Math.round(db)} dB`;
+        }
+
+        function formatMotionTrimLabel(sliderValue) {
+            const normalized = sliderValue / 100;
+            const trimFactor = Math.pow(2, (normalized - 0.5) * 3);
+            return `${trimFactor.toFixed(1)}x`;
         }
         
         function canAccessMicrophone() {
@@ -308,6 +355,224 @@
 
         function hideBanner() {
             document.getElementById('connectionBanner').classList.remove('visible');
+        }
+
+        function updateMotionUI() {
+            const status = document.getElementById('motionStatusText');
+            const indicator = document.getElementById('motionIndicator');
+            const startButton = document.getElementById('btnStartMotion');
+            const stopButton = document.getElementById('btnStopMotion');
+            const details = document.getElementById('motionDetails');
+
+            indicator.classList.remove('active', 'error');
+
+            if (!motionSupported) {
+                status.textContent = 'Not supported';
+                details.textContent = 'This browser does not expose device orientation events.';
+                startButton.disabled = true;
+                stopButton.disabled = true;
+                return;
+            }
+
+            if (motionEnabled) {
+                indicator.classList.add('active');
+                status.textContent = 'Streaming';
+                details.textContent = `Orientation at ${motionUpdateHz} Hz`;
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                return;
+            }
+
+            if (motionPermissionRequired && !motionPermissionGranted) {
+                status.textContent = 'Permission required';
+                details.textContent = 'Tap Enable Motion and allow sensor access.';
+            } else {
+                status.textContent = 'Ready';
+                details.textContent = `Will send orientation at up to ${motionUpdateHz} Hz`;
+            }
+
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        }
+
+        function clampSigned(value, maxAbs) {
+            return Math.max(-maxAbs, Math.min(maxAbs, value));
+        }
+
+        function clampUnsigned(value, maxValue) {
+            return Math.max(0, Math.min(maxValue, value));
+        }
+
+        function normalizeAngle(value) {
+            if (typeof value !== 'number' || Number.isNaN(value)) {
+                return 0;
+            }
+            let normalized = value;
+            while (normalized > 180) normalized -= 360;
+            while (normalized < -180) normalized += 360;
+            return normalized;
+        }
+
+        function updateMotionValueDisplay(sample) {
+            document.getElementById('motionBetaValue').textContent = `${sample.beta.toFixed(1)} deg`;
+            document.getElementById('motionGammaValue').textContent = `${sample.gamma.toFixed(1)} deg`;
+            document.getElementById('motionMagnitudeValue').textContent = sample.magnitude.toFixed(2);
+        }
+
+        function buildMotionSample() {
+            if (!latestOrientationSample && !latestAccelerationSample) {
+                return null;
+            }
+
+            const scaleSigned = (value, clampMax) => clampSigned(value * motionTrim, clampMax);
+            const scaleUnsigned = (value, clampMax) => clampUnsigned(value * motionTrim, clampMax);
+
+            return {
+                alpha: latestOrientationSample ? scaleSigned(latestOrientationSample.alpha, motionClamp.alpha) : 0,
+                beta: latestOrientationSample ? scaleSigned(latestOrientationSample.beta, motionClamp.beta) : 0,
+                gamma: latestOrientationSample ? scaleSigned(latestOrientationSample.gamma, motionClamp.gamma) : 0,
+                ax: latestAccelerationSample ? scaleSigned(latestAccelerationSample.ax, motionClamp.acceleration) : 0,
+                ay: latestAccelerationSample ? scaleSigned(latestAccelerationSample.ay, motionClamp.acceleration) : 0,
+                az: latestAccelerationSample ? scaleSigned(latestAccelerationSample.az, motionClamp.acceleration) : 0,
+                magnitude: latestAccelerationSample ? scaleUnsigned(latestAccelerationSample.magnitude, motionClamp.magnitude) : 0
+            };
+        }
+
+        function sendMotionSample(sample) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            const message = {
+                type: 'motion',
+                controlId: 'deviceMotion',
+                alpha: sample.alpha,
+                beta: sample.beta,
+                gamma: sample.gamma,
+                ax: sample.ax,
+                ay: sample.ay,
+                az: sample.az,
+                magnitude: sample.magnitude,
+                timestamp: Date.now()
+            };
+
+            ws.send(JSON.stringify(message));
+            eventCount++;
+            document.getElementById('eventCount').textContent = eventCount;
+        }
+
+        function sendCombinedMotionSample() {
+            if (!motionEnabled) {
+                return;
+            }
+
+            const sample = buildMotionSample();
+            if (!sample) {
+                return;
+            }
+
+            updateMotionValueDisplay(sample);
+            sendMotionSample(sample);
+        }
+
+        function handleDeviceOrientation(event) {
+            const alpha = clampSigned(normalizeAngle(event.alpha ?? 0), motionClamp.alpha);
+            const beta = clampSigned(event.beta ?? 0, motionClamp.beta);
+            const gamma = clampSigned(event.gamma ?? 0, motionClamp.gamma);
+
+            latestOrientationSample = {
+                alpha,
+                beta,
+                gamma
+            };
+        }
+
+        function handleDeviceMotion(event) {
+            const acc = event.accelerationIncludingGravity || event.acceleration;
+            if (!acc) {
+                return;
+            }
+
+            const ax = clampSigned(acc.x ?? 0, motionClamp.acceleration);
+            const ay = clampSigned(acc.y ?? 0, motionClamp.acceleration);
+            const az = clampSigned(acc.z ?? 0, motionClamp.acceleration);
+            const magnitude = clampUnsigned(Math.sqrt((ax * ax) + (ay * ay) + (az * az)), motionClamp.magnitude);
+
+            latestAccelerationSample = {
+                ax,
+                ay,
+                az,
+                magnitude
+            };
+        }
+
+        function stopMotion() {
+            motionEnabled = false;
+            latestOrientationSample = null;
+            latestAccelerationSample = null;
+            if (motionTimerId) {
+                clearInterval(motionTimerId);
+                motionTimerId = null;
+            }
+            window.removeEventListener('deviceorientation', handleDeviceOrientation);
+            window.removeEventListener('devicemotion', handleDeviceMotion);
+            document.getElementById('motionBetaValue').textContent = '-';
+            document.getElementById('motionGammaValue').textContent = '-';
+            document.getElementById('motionMagnitudeValue').textContent = '-';
+            updateMotionUI();
+        }
+
+        async function startMotion() {
+            if (!motionSupported) {
+                updateMotionUI();
+                return;
+            }
+
+            try {
+                if (motionPermissionRequired) {
+                    const orientationPermission = await DeviceOrientationEvent.requestPermission();
+                    if (orientationPermission !== 'granted') {
+                        throw new Error('Motion permission denied');
+                    }
+                    motionPermissionGranted = true;
+
+                    if (typeof DeviceMotionEvent !== 'undefined'
+                            && typeof DeviceMotionEvent.requestPermission === 'function') {
+                        try {
+                            const motionPermission = await DeviceMotionEvent.requestPermission();
+                            motionPermissionGranted = motionPermissionGranted && motionPermission === 'granted';
+                        } catch (err) {
+                            log('Device motion permission request failed:', err);
+                        }
+                    }
+                } else {
+                    motionPermissionGranted = true;
+                }
+
+                motionEnabled = true;
+                latestOrientationSample = null;
+                latestAccelerationSample = null;
+                window.addEventListener('deviceorientation', handleDeviceOrientation);
+                window.addEventListener('devicemotion', handleDeviceMotion);
+                motionTimerId = window.setInterval(sendCombinedMotionSample, motionUpdateIntervalMs);
+                updateMotionUI();
+            } catch (err) {
+                motionEnabled = false;
+                motionPermissionGranted = false;
+                document.getElementById('motionStatusText').textContent = 'Permission denied';
+                document.getElementById('motionIndicator').classList.remove('active');
+                document.getElementById('motionIndicator').classList.add('error');
+                document.getElementById('motionDetails').textContent = err.message || 'Unable to start motion sensors.';
+                document.getElementById('btnStartMotion').disabled = false;
+                document.getElementById('btnStopMotion').disabled = true;
+            }
+        }
+
+        function detectMotionSupport() {
+            motionSupported = typeof DeviceOrientationEvent !== 'undefined';
+            motionPermissionRequired = motionSupported
+                && typeof DeviceOrientationEvent.requestPermission === 'function';
+            updateMotionUI();
         }
         
         function connect() {
@@ -362,6 +627,26 @@
                         audioConfigReceived = true;
                         updateAudioConfigDisplay();
                     }
+                    if (typeof data.motionUpdateHz === 'number' && data.motionUpdateHz > 0) {
+                        motionUpdateHz = data.motionUpdateHz;
+                        motionUpdateIntervalMs = Math.max(10, Math.round(1000 / motionUpdateHz));
+                    }
+                    if (typeof data.motionAlphaClampDegrees === 'number') {
+                        motionClamp.alpha = data.motionAlphaClampDegrees;
+                    }
+                    if (typeof data.motionBetaClampDegrees === 'number') {
+                        motionClamp.beta = data.motionBetaClampDegrees;
+                    }
+                    if (typeof data.motionGammaClampDegrees === 'number') {
+                        motionClamp.gamma = data.motionGammaClampDegrees;
+                    }
+                    if (typeof data.motionAccelerationClampG === 'number') {
+                        motionClamp.acceleration = data.motionAccelerationClampG;
+                    }
+                    if (typeof data.motionMagnitudeClampG === 'number') {
+                        motionClamp.magnitude = data.motionMagnitudeClampG;
+                    }
+                    updateMotionUI();
                     break;
                 case 'audio-config-ack':
                     log('Audio config acknowledged:', data);
@@ -696,6 +981,13 @@
             document.getElementById('gainValue').textContent = formatGainLabel(Number(e.target.value));
             sendEvent('slider', 'gainSlider', value);
         });
+
+        document.getElementById('motionTrimSlider').addEventListener('input', (e) => {
+            const sliderValue = Number(e.target.value);
+            const normalized = sliderValue / 100;
+            motionTrim = Math.pow(2, (normalized - 0.5) * 3);
+            document.getElementById('motionTrimValue').textContent = formatMotionTrimLabel(sliderValue);
+        });
         
         document.getElementById('btnAction1').addEventListener('click', () => {
             sendEvent('button', 'action1');
@@ -711,9 +1003,13 @@
         
         document.getElementById('btnStartAudio').addEventListener('click', startAudio);
         document.getElementById('btnStopAudio').addEventListener('click', stopAudio);
+        document.getElementById('btnStartMotion').addEventListener('click', startMotion);
+        document.getElementById('btnStopMotion').addEventListener('click', stopMotion);
         
         // Initialize
         updateAudioUI();
+        detectMotionSupport();
+        document.getElementById('motionTrimValue').textContent = formatMotionTrimLabel(50);
         connect();
     </script>
 </body>

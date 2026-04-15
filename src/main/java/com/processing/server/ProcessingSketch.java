@@ -18,6 +18,7 @@ public class ProcessingSketch extends PApplet {
     private final int sketchWidth;
     private final int sketchHeight;
     private final DebugConfig debugConfig;
+    private final MotionConfig motionConfig;
     
     private final Map<String, float[]> userPositions = new HashMap<>();
     // Touch events update the target position; draw() eases toward it so the speed slider can
@@ -30,17 +31,26 @@ public class ProcessingSketch extends PApplet {
     private final Map<String, Float> userGains = new HashMap<>();
     private final Map<String, Float> userPulseBoosts = new HashMap<>();
     private final Map<String, Float> userHueVelocities = new HashMap<>();
+    private final Map<String, float[]> userMotion = new HashMap<>();
+    private final Map<String, Float> userLastMotionMagnitudes = new HashMap<>();
     
     private float globalAudioLevel = 0;
     private float smoothedGlobalAudioLevel = 0;
     private int audioFrameCount = 0;
+    private int motionFrameCount = 0;
     
-    public ProcessingSketch(EventQueue eventQueue, AudioBuffer audioBuffer, int width, int height, DebugConfig debugConfig) {
+    public ProcessingSketch(EventQueue eventQueue,
+                            AudioBuffer audioBuffer,
+                            int width,
+                            int height,
+                            DebugConfig debugConfig,
+                            MotionConfig motionConfig) {
         this.eventQueue = eventQueue;
         this.audioBuffer = audioBuffer;
         this.sketchWidth = width;
         this.sketchHeight = height;
         this.debugConfig = debugConfig;
+        this.motionConfig = motionConfig;
     }
 
     @Override
@@ -87,6 +97,8 @@ public class ProcessingSketch extends PApplet {
         
         switch (event.eventType()) {
             case "touch" -> {
+                // Touch is the primary spatial input. It updates the persistent target position
+                // that the draw loop eases toward on each frame.
                 if (!userPositions.containsKey(sessionId)) {
                     initializeUser(sessionId);
                 }
@@ -95,6 +107,8 @@ public class ProcessingSketch extends PApplet {
                 targetPos[1] = event.y();
             }
             case "slider" -> {
+                // Sliders tune per-user visual and audio-response parameters without directly
+                // moving the sketch objects.
                 if (!userPositions.containsKey(sessionId)) {
                     initializeUser(sessionId);
                 }
@@ -109,10 +123,69 @@ public class ProcessingSketch extends PApplet {
                 }
             }
             case "button" -> {
+                // Buttons trigger short-lived visual actions such as burst, hue spin, and scatter.
                 if (!userPositions.containsKey(sessionId)) {
                     initializeUser(sessionId);
                 }
                 handleButtonEvent(sessionId, event.controlId());
+            }
+            case "motion" -> {
+                // Motion is an additive layer from phone sensors. Tilt offsets the rendered
+                // position around the touch target, and shake intensity can inject burst energy.
+                if (!userPositions.containsKey(sessionId)) {
+                    initializeUser(sessionId);
+                }
+                handleMotionEvent(sessionId, event);
+            }
+        }
+    }
+
+    private void handleMotionEvent(String sessionId, UserInputEvent event) {
+        float[] previousMotion = userMotion.getOrDefault(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
+
+        // Motion updates layer on top of touch targets rather than replacing them outright.
+        userMotion.put(sessionId, new float[]{
+            event.alpha(),
+            event.beta(),
+            event.gamma(),
+            event.ax(),
+            event.ay(),
+            event.az(),
+            event.magnitude()
+        });
+
+        float previousMagnitude = userLastMotionMagnitudes.getOrDefault(sessionId, 0f);
+        float magnitudeDelta = max(0f, event.magnitude() - previousMagnitude);
+        userLastMotionMagnitudes.put(sessionId, event.magnitude());
+
+        float axisDelta = abs(event.ax() - previousMotion[3])
+            + abs(event.ay() - previousMotion[4])
+            + abs(event.az() - previousMotion[5]);
+        float axisShake = axisDelta / max(0.01f, motionConfig.getAccelerationClampG());
+        float combinedShakeSignal = max(axisShake, magnitudeDelta);
+        float shakeIntensity = max(0f, combinedShakeSignal - motionConfig.getShakeThresholdG());
+        if (shakeIntensity > 0f) {
+            float normalizedShake = constrain(
+                shakeIntensity / max(0.01f, motionConfig.getMagnitudeClampG() - motionConfig.getShakeThresholdG()),
+                0f,
+                1f
+            );
+            float burstBoost = normalizedShake * motionConfig.getShakeBurstScale();
+            // A harder shake should look like a stronger burst, not a binary trigger.
+            userPulseBoosts.put(sessionId, max(userPulseBoosts.getOrDefault(sessionId, 0f), burstBoost));
+            userHueVelocities.put(sessionId,
+                userHueVelocities.getOrDefault(sessionId, 0f) + random(-6f, 6f) * max(0.4f, normalizedShake));
+        }
+
+        if (motionConfig.isDebugLogging()) {
+            motionFrameCount++;
+            if (motionFrameCount <= motionConfig.getDebugSampleLimit()) {
+                println("Motion stored for " + sessionId.substring(0, 8)
+                        + ": beta=" + nf(event.beta(), 0, 2)
+                        + ", gamma=" + nf(event.gamma(), 0, 2)
+                        + ", magnitude=" + nf(event.magnitude(), 0, 2)
+                        + ", magnitudeDelta=" + nf(magnitudeDelta, 0, 2)
+                        + ", axisDelta=" + nf(axisDelta, 0, 2));
             }
         }
     }
@@ -135,6 +208,8 @@ public class ProcessingSketch extends PApplet {
         int totalSessions = 0;
         
         for (String sessionId : audioBuffer.getActiveSessionIds()) {
+            // Audio is handled separately from JSON events. Each active audio stream contributes
+            // per-user level data plus a shared global meter.
             float level = calculateAudioLevel(sessionId);
             userAudioLevels.put(sessionId, new float[]{level});
             
@@ -163,6 +238,8 @@ public class ProcessingSketch extends PApplet {
         userGains.put(sessionId, DEFAULT_GAIN);
         userPulseBoosts.put(sessionId, 0f);
         userHueVelocities.put(sessionId, 0f);
+        userMotion.put(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
+        userLastMotionMagnitudes.put(sessionId, 0f);
         
         if (debugConfig.isLogging()) {
             println("Initialized user " + sessionId.substring(0, 8) + " at position (" 
@@ -240,13 +317,33 @@ public class ProcessingSketch extends PApplet {
             float speedValue = userSpeeds.getOrDefault(sessionId, DEFAULT_SPEED);
             float pulseBoost = userPulseBoosts.getOrDefault(sessionId, 0f);
             float hueVelocity = userHueVelocities.getOrDefault(sessionId, 0f);
+            float[] motion = userMotion.getOrDefault(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
 
             // One slider drives both movement response and how quickly temporary effects settle.
             float updateSpeed = map(speedValue, 0, 1, 0.04f, 0.35f);
             float animationSpeed = map(speedValue, 0, 1, 0.85f, 2.8f);
             float decay = map(speedValue, 0, 1, 0.035f, 0.18f);
-            pos[0] = lerp(pos[0], targetPos[0], updateSpeed);
-            pos[1] = lerp(pos[1], targetPos[1], updateSpeed);
+            // Motion tilt is applied as a bounded offset around the touch target so phone sensors
+            // feel expressive without discarding the existing touch interaction model.
+            float gammaOffset = map(
+                motion[2],
+                -motionConfig.getGammaClampDegrees(),
+                motionConfig.getGammaClampDegrees(),
+                -motionConfig.getTiltOffsetNormalized(),
+                motionConfig.getTiltOffsetNormalized()
+            );
+            float betaOffset = map(
+                motion[1],
+                -motionConfig.getBetaClampDegrees(),
+                motionConfig.getBetaClampDegrees(),
+                -motionConfig.getTiltOffsetNormalized(),
+                motionConfig.getTiltOffsetNormalized()
+            );
+            float displayX = constrain(targetPos[0] + gammaOffset, 0.05f, 0.95f);
+            float displayY = constrain(targetPos[1] + betaOffset, 0.1f, 0.9f);
+
+            pos[0] = lerp(pos[0], displayX, updateSpeed);
+            pos[1] = lerp(pos[1], displayY, updateSpeed);
 
             hueVelocity = lerp(hueVelocity, 0, decay);
             color[0] = (color[0] + hueVelocity * animationSpeed + 360) % 360;
