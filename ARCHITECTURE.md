@@ -155,6 +155,7 @@ server:
           welcome: "index.html"
 
 processing:
+  sketch-class: "com.processing.server.ProcessingSketch"
   width: 800
   height: 600
   fps: 60
@@ -185,6 +186,7 @@ debug:
 | `server.port` | Local HTTP and WebSocket port |
 | `server.host` | `127.0.0.1` keeps the default listener local-only |
 | `static-content.classpath` | Serves `src/main/resources/static/` at `/` |
+| `processing.sketch-class` | Selects which Processing `PApplet` class the server starts |
 | `processing.width/height` | Canvas dimensions |
 | `processing.fps` | Target frame rate |
 | `audio.mode` | Selects the sample rate/channel profile used by the audio pipeline |

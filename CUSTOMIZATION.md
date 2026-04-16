@@ -89,6 +89,7 @@ server:
           welcome: "index.html"
 
 processing:
+  sketch-class: "com.processing.server.ProcessingSketch"
   width: 800
   height: 600
   fps: 60
@@ -114,6 +115,22 @@ audio:
 debug:
   logging: false
 ```
+
+If you want the server to launch a different sketch class, change:
+
+- `processing.sketch-class`
+
+The alternate class must:
+
+- extend `PApplet`
+- use the same constructor shape as `ProcessingSketch`
+- provide a public `runSketch()` method
+
+Included example:
+
+- `com.processing.server.StarterSketch`
+
+That sketch is intentionally small. It is useful when you want to prove that sketch selection is working before you move on to a more complex custom class.
 
 ### Change Motion Behavior
 
@@ -259,6 +276,30 @@ Find the touch area in CSS:
 }
 ```
 
+#### 5. Keyboard Input
+
+Keyboard input is already wired into the browser client.
+
+What it does:
+- listens for `keydown` and `keyup` on the focused page
+- sends `type: "key"` events over WebSocket
+- ignores range sliders and buttons so normal UI keyboard use still works
+
+If you want to customize it, start in:
+
+- `src/main/resources/static/index.html`
+
+Look for:
+
+- `handleKeyDown(event)`
+- `handleKeyUp(event)`
+- `sendKeyEvent(action, event)`
+
+Important:
+- browser keyboard input only works when the browser page has focus
+- local Processing `keyPressed()` or `keyReleased()` code only works when the Processing sketch window has focus
+- a custom sketch can support one path or both, depending on how you want students to interact with it
+
 ---
 
 ## Creating Your Own Processing Sketch
@@ -269,10 +310,23 @@ Contents:
 - [Minimal Custom Sketch Template](#minimal-custom-sketch-template)
 - [Event Types Available](#event-types-available)
 - [Processing Methods You Can Override](#processing-methods-you-can-override)
+- [Where To Observe Or Manipulate Runtime Data](#where-to-observe-or-manipulate-runtime-data)
 
 ### Location
 
 The Processing sketch is `src/main/java/com/processing/server/ProcessingSketch.java`.
+
+You can also point the server at a different sketch class by changing:
+
+- `processing.sketch-class` in `src/main/resources/application.yaml`
+
+The included `StarterSketch` class is a minimal example of an alternate sketch that still uses the project's constructor contract.
+
+If you want to try a reviewed generated sketch in the app without mixing it into the main handwritten source tree, place it under:
+
+- `generated-src/main/java/com/processing/server/`
+
+Maven is configured to compile that folder along with the normal `src/main/java` tree.
 
 ### What to Preserve
 
@@ -379,6 +433,7 @@ public class ProcessingSketch extends PApplet {
 | `touch` | `x`, `y` (0-1 normalized) | Touch/mouse position |
 | `slider` | `controlId`, `value` (0-1) | Slider value change |
 | `button` | `controlId` | Button clicked |
+| `key` | `key`, `keyCode`, `action` | Keyboard key pressed or released from the focused browser page |
 | `motion` | `alpha`, `beta`, `gamma`, `ax`, `ay`, `az`, `magnitude` | Phone tilt and shake sample |
 | `color` | `controlId`, `value` (packed RGB) | Color picker change |
 | `audio` | Binary WebSocket frame | PCM audio samples |
@@ -419,7 +474,7 @@ public void mousePressed() {
 
 @Override
 public void keyPressed() {
-    // Handle keyboard input
+    // Handle local keyboard input when the Processing window has focus
 }
 
 @Override
@@ -427,6 +482,139 @@ public void exit() {
     // Cleanup before closing
 }
 ```
+
+### Where To Observe Or Manipulate Runtime Data
+
+If you want to inspect, transform, filter, or redirect data in this application, these are the main hook points.
+
+#### Helidon server side
+
+For real-time browser input, start with:
+
+- `src/main/java/com/processing/server/WebSocketHandler.java`
+
+The most useful methods are:
+
+- `onOpen(WsSession session)`
+  use this if you want to initialize per-connection state, send extra welcome data, or log when a browser connects
+- `onMessage(WsSession session, String message, boolean last)`
+  this is the entry point for JSON messages such as touch, slider, button, and motion input
+- `handleControlEvent(JsonObject json)`
+  use this if you want to inspect or modify control values before they become `UserInputEvent` objects
+- `handleKeyEvent(JsonObject json)`
+  use this if you want to remap browser keyboard input, drop repeat-style events, or translate keys into higher-level commands before they reach the sketch
+- `handleMotionEvent(JsonObject json)`
+  use this if you want to clamp motion differently, calculate new motion fields, or reject noisy input
+- `onMessage(WsSession session, BufferData buffer, boolean last)`
+  this is the entry point for binary audio frames from the browser
+
+For server-side audio buffering, look at:
+
+- `src/main/java/com/processing/server/AudioBuffer.java`
+
+The most useful methods are:
+
+- `push(String sessionId, byte[] audioData)`
+  use this if you want to inspect, replace, compress, meter, or fork audio as it arrives from the browser
+- `poll(String sessionId)`
+  use this if you want to change how the sketch reads audio chunks
+- `clearSession(String sessionId)`
+  this is where per-session audio cleanup happens when a connection closes
+- `getActiveSessionIds()`
+  use this if you want to iterate over every session currently contributing audio
+
+If you wanted to add an explicit audio-processing stage on the server, a likely helper method would look something like:
+
+```java
+private byte[] processIncomingAudio(String sessionId, byte[] audioData) {
+    // inspect or transform audio here
+    return audioData;
+}
+```
+
+That helper would fit naturally inside `WebSocketHandler.onMessage(... BufferData ...)` before `audioBuffer.push(...)`.
+
+For REST-style inspection or tooling endpoints, start with:
+
+- `src/main/java/com/processing/server/InputService.java`
+
+Useful methods:
+
+- `getStatus(...)`
+  a natural place to expose more runtime information for debugging or teaching
+- `handleEvent(...)`
+  useful if you want to support non-WebSocket event injection
+
+#### Processing sketch side
+
+For the Processing side, start with:
+
+- `src/main/java/com/processing/server/ProcessingSketch.java`
+
+The main places to look are:
+
+- `processEvents()`
+  this drains the shared event queue once per frame
+- `handleEvent(UserInputEvent event)`
+  this is the central router for touch, slider, button, key, and motion events
+- `handleKeyEvent(String sessionId, UserInputEvent event)`
+  use this if you want browser keyboard input to affect your sketch directly
+- `handleMotionEvent(String sessionId, UserInputEvent event)`
+  use this if you want to change how tilt and shake are interpreted
+- `processAudio()`
+  this is the main loop for pulling queued audio into sketch-side state
+- `calculateAudioLevel(String sessionId)`
+  this is the most direct place to change how raw PCM bytes become an amplitude value
+- `drawUsers()`
+  this is where stored per-user state becomes visible graphics
+- `initializeUser(String sessionId)`
+  this is where sketch-side per-session state is first created
+
+If you want to manipulate the sketch's per-user audio state directly, the natural places are:
+
+- inside `processAudio()`, after `calculateAudioLevel(sessionId)`
+- inside `drawUsers()`, where `userAudioLevels` and `userMotion` are already being read
+
+If you wanted a clearer custom hook for sketch-side audio behavior, a likely helper method might look like:
+
+```java
+private float transformAudioLevel(String sessionId, float rawLevel) {
+    // shape, smooth, or remap the level here
+    return rawLevel;
+}
+```
+
+and you would call it from `processAudio()` before storing into `userAudioLevels`.
+
+If you wanted a custom hook for control events before they affect drawing, a likely helper method might look like:
+
+```java
+private UserInputEvent transformEvent(UserInputEvent event) {
+    // modify or remap event fields here
+    return event;
+}
+```
+
+and you would call it from `processEvents()` or `handleEvent(...)`.
+
+#### Rule of thumb
+
+Use the Helidon-side classes when you want to:
+
+- inspect raw incoming browser data
+- reject or clamp data before the sketch sees it
+- add diagnostics or alternate server endpoints
+
+Use the sketch-side methods when you want to:
+
+- change how the stored data affects the visuals
+- mix several inputs together into one visual behavior
+- experiment artistically without rewriting the networking layer
+
+Keyboard note:
+- browser `key` events arrive through `WebSocketHandler` and `EventQueue`
+- local Processing keyboard input does not go through Helidon or the browser at all
+- if you preserve local Processing keyboard handlers from a PDE sketch, those handlers remain separate from the browser keyboard protocol
 
 ---
 
@@ -1032,142 +1220,19 @@ mvn clean package -DskipTests
 
 ## Using AI Coding Assistants
 
-Contents:
-- [Give Context About the Project](#give-context-about-the-project)
-- [Example Prompts](#example-prompts)
-- [Best Practices with AI Assistants](#best-practices-with-ai-assistants)
-- [Common Issues AI Can Help With](#common-issues-ai-can-help-with)
-- [Code Review Prompt](#code-review-prompt)
+We have written a separate AI Customization guide. 
+This guide includes sample prompts and information that you might want to provide your AI Coding agent when you want to customize your application.
 
-AI coding assistants (like Cursor, GitHub Copilot, ChatGPT, Claude) can significantly speed up customization. Here's how to use them effectively.
+- [AI_CUSTOMIZATION_GUIDE.md](AI_CUSTOMIZATION_GUIDE.md)
 
-### Give Context About the Project
+This guide will give you:
 
-When asking for help, provide context:
+- safe edit zones by task type
+- runtime contracts the AI should preserve
+- prompt templates
+- file-by-file edit maps
+- what source snippets you should paste into the AI
 
-```
-I'm working on a Processing.org visualization that receives touch, slider, 
-and audio events from multiple browser clients via WebSocket. The project 
-structure is:
-
-- ProcessingSketch.java - The main Processing PApplet that draws visuals
-- EventQueue.java - Thread-safe queue of UserInputEvent objects
-- AudioBuffer.java - Per-session audio data ByteBuffer
-- UserInputEvent.java - Record with sessionId, eventType, controlId, value, x, y
-
-The draw() loop calls:
-1. processEvents() - polls EventQueue for touch/slider events
-2. processAudio() - polls AudioBuffer for audio levels
-3. drawUsers() - renders user positions and audio-reactive elements
-
-I want to [YOUR CUSTOMIZATION].
-```
-
-### Example Prompts
-
-#### Adding a New Visual Element
-
-```
-I want to add a starfield background that responds to global audio levels.
-When audio is high, particles should move faster. Can you show me how to:
-1. Create a Star class for individual particles
-2. Initialize stars in setup()
-3. Update and draw stars in draw() based on smoothedGlobalAudioLevel
-```
-
-#### Creating a New Event Type
-
-```
-I want to add a "shake" event that makes all users' circles vibrate.
-The browser sends: {"type":"shake","controlId":"shakeButton","value":0.5}
-where value is intensity 0-1.
-
-Show me:
-1. How to modify index.html to send this event
-2. How to handle it in processEvents()
-3. How to create a shake effect that affects all users
-```
-
-#### Debugging Performance
-
-```
-When I have more than 5 users, the frame rate drops below 30 FPS.
-Here's my current draw() method: [paste code]
-
-How can I optimize this for better performance? Should I:
-- Use P2D renderer instead of default?
-- Reduce particle count?
-- Use threading for event processing?
-```
-
-### Best Practices with AI Assistants
-
-#### 1. Share Small, Focused Files
-
-Instead of pasting the entire 200-line file, extract what's relevant:
-
-```java
-// Here's my current handleEvent method:
-private void handleEvent(UserInputEvent event) {
-    switch (event.eventType()) {
-        case "touch" -> { /* ... */ }
-        // Add new case here
-    }
-}
-```
-
-#### 2. Ask for Incremental Changes
-
-Instead of: "Rewrite the entire sketch to add particles"
-
-Ask: "Show me how to add a List<Particle> field and update it in draw()"
-
-#### 3. Request Explanations
-
-```
-Can you explain why my particle system is causing flickering?
-Here's my code: [paste]
-
-Also explain how to use P2D renderer to fix this.
-```
-
-#### 4. Ask for Complete Examples
-
-```
-Can you provide a complete implementation of:
-- Particle.java class
-- List<Particle> field
-- Particle emission on touch events
-- Particle update and draw in draw()
-
-Make it work with my existing code structure.
-```
-
-### Common Issues AI Can Help With
-
-| Issue | Prompt |
-|-------|--------|
-| Users spawning on top of each other | "How do I ensure new users spawn at non-overlapping positions?" |
-| Audio levels not accurate | "Show me how to calculate RMS amplitude from PCM byte data" |
-| Performance issues | "Optimize my draw() method to maintain 60 FPS with 10+ users" |
-| WebSocket not connecting | "Debug why WebSocket fails to connect over HTTPS" |
-| Adding images/sprites | "Show me how to load and draw images in Processing" |
-| 3D effects | "Convert my 2D ellipse to a 3D sphere using P3D renderer" |
-| Saving screenshots | "Add a keyPress handler to save the canvas as PNG" |
-
-### Code Review Prompt
-
-After making changes, ask:
-
-```
-Review my modifications for:
-1. Thread safety in concurrent access
-2. Memory leaks or resource cleanup
-3. Performance issues (excessive object creation)
-4. Proper use of Processing lifecycle (settings/setup/draw)
-
-Here's the changed code: [paste]
-```
 
 ---
 

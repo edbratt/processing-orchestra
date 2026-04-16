@@ -48,6 +48,17 @@ The important objects created there are:
 
 These are not just random classes. They are the core runtime building blocks of the app.
 
+A few Java words appear often in this explanation:
+
+- `object`
+  a specific thing created while the program is running, such as one `WebSocketHandler` for one browser connection
+- `map`
+  a container that stores data as key-value pairs, like a labeled set of boxes where one label points to one value
+- `queue`
+  a container that holds items in waiting order, like a line of people waiting their turn
+- `record`
+  a compact Java way to store a small bundle of related data values together
+
 ## The Runtime Pieces and Their Jobs
 
 ### `SessionManager.java`
@@ -65,6 +76,15 @@ What it does:
 Why it matters:
 
 The sketch needs to know which circle or audio stream belongs to which browser client. `SessionManager` makes that possible.
+
+How it stores that:
+
+`SessionManager` uses a `map`, which means a container storing key-value pairs. In this case:
+
+- the key is the `sessionId`
+- the value is a small `SessionInfo` record containing:
+  - the same `sessionId`
+  - the time the session was created
 
 Good beginner question:
 
@@ -110,6 +130,10 @@ What it does:
 Why it matters:
 
 Audio is different from small control messages. It arrives as a continuous stream of binary data. `AudioBuffer` gives the sketch a place to read that audio from when it is ready.
+
+How it stores that:
+
+`AudioBuffer` also uses a `map`, but here each session ID points to its own audio `queue`, which is a waiting line of audio chunks for that one browser client.
 
 Good beginner idea:
 
@@ -220,6 +244,191 @@ When a user opens the page:
 4. The server associates that connection with a session.
 
 That session tracking is important because multiple people may be connected at once. The app needs to know which input belongs to which person.
+
+## How One Browser Client Is Represented At Runtime
+
+One important idea for reading this code is that a browser client is not represented by one big `Client` object.
+
+Instead, one browser client is represented in a distributed way across several runtime objects and data containers, mostly tied together by one shared `sessionId` string.
+
+For one connected browser client, the runtime picture looks like this:
+
+- one Helidon `WsSession`
+  this is Helidon's object for the actual open WebSocket connection
+- one `WebSocketHandler` object
+  this handler belongs to that connection and stores the session ID for it
+- one `SessionInfo` record inside `SessionManager`
+  this is the server's official session registry entry
+- zero or more `UserInputEvent` records in `EventQueue`
+  each event carries that same `sessionId`
+- zero or more queued audio chunks in `AudioBuffer`
+  stored under that `sessionId`
+- one bundle of sketch-side user state in `ProcessingSketch`
+  spread across several maps, all keyed by that `sessionId`
+
+So the main idea is:
+
+- there is not one big client object
+- there is one shared session ID
+- that session ID connects the networking side, the event side, the audio side, and the sketch side
+
+## What Happens When A New Session Is Created
+
+The most important runtime path is in:
+
+- [WebSocketHandler.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/WebSocketHandler.java)
+
+When the browser opens `/ws`, Helidon creates a new `WsSession` for that live socket connection.
+
+At the same time, the application uses a new `WebSocketHandler` object for that connection. This is important because the app no longer reuses one shared mutable handler. Each connection gets its own handler instance.
+
+Then, inside `WebSocketHandler.onOpen(...)`, this happens:
+
+1. the `WsSession` is added to `OPEN_SESSIONS`
+2. `SessionManager.createSession()` is called
+3. `SessionManager` generates a new UUID session ID
+4. `SessionManager` stores a new `SessionInfo` record in its internal map
+5. the `WebSocketHandler` stores that session ID in its own `sessionId` field
+6. the server sends a welcome JSON message back to the browser
+
+That welcome message includes:
+
+- `type: "session"`
+- `sessionId`
+- audio settings
+- motion settings
+
+So the browser learns, "this is my session ID," from the server as soon as the WebSocket opens.
+
+## What Gets Created Immediately, And What Gets Created Later
+
+This is a useful distinction for students.
+
+### Created immediately when the WebSocket opens
+
+- a Helidon `WsSession`
+- a `WebSocketHandler` object for that connection
+- a `SessionInfo` record in `SessionManager`
+
+### Not created immediately
+
+- sketch-side visual state in `ProcessingSketch`
+- audio queues in `AudioBuffer`
+- queued `UserInputEvent` records
+
+Those later pieces only appear when the browser actually starts sending data that needs them.
+
+So the session exists first, and the rest of the user state appears lazily, meaning only when it becomes necessary.
+
+## How Control Messages Represent A Client
+
+Touch, slider, button, and motion inputs all become `UserInputEvent` records.
+
+A `UserInputEvent` record is a small bundle of data that carries things like:
+
+- `sessionId`
+- event type
+- control ID
+- values such as `x`, `y`, `value`, or motion fields
+- timestamp
+
+So the queue does not store a big client object. It stores many small event records, each tagged with the session they belong to.
+
+This means the client is represented in control flow mostly as:
+
+- a session ID attached to each event record
+
+## How Audio Represents A Client
+
+Audio is stored differently.
+
+In `AudioBuffer`, the app keeps a map where:
+
+- the key is the `sessionId`
+- the value is that client's audio queue
+
+That means each client's audio stream is represented by its own entry in `AudioBuffer`, keyed by session ID.
+
+Again, there is no large audio-client object. It is:
+
+- session ID
+- mapped to queued audio chunks
+
+## How The Sketch Represents A Client
+
+The Processing sketch has the richest client state, but even there it is not stored as one user object.
+
+Instead, `ProcessingSketch` uses several maps keyed by `sessionId`.
+
+Examples include:
+
+- `userPositions`
+- `userTargetPositions`
+- `userColors`
+- `userAudioLevels`
+- `userSizes`
+- `userSpeeds`
+- `userGains`
+- `userPulseBoosts`
+- `userHueVelocities`
+- `userMotion`
+- `userLastMotionMagnitudes`
+
+So one browser client becomes a bundle of entries across many maps.
+
+You can think of this as:
+
+- one user
+- many labeled boxes of state
+- all tied together by the same session ID
+
+## When The Sketch Creates A New User
+
+The sketch does not create a user entry during `WebSocketHandler.onOpen(...)`.
+
+Instead, it waits until that session first does something that matters to the sketch, such as:
+
+- sending a touch event
+- moving a slider
+- pressing a button
+- sending a motion event
+- or contributing audio
+
+At that point, `ProcessingSketch` checks whether it already has state for that session. If not, it calls `initializeUser(sessionId)`.
+
+That method creates the sketch-side default values for the new user, including:
+
+- starting position
+- target position
+- color
+- default size
+- default speed
+- default gain
+- default pulse boost
+- default hue velocity
+- default motion data
+- default last-motion magnitude
+
+So the visual user is created lazily, not at the instant the network session opens.
+
+## What Happens When A Client Disconnects
+
+When the socket closes or errors:
+
+1. the `WsSession` is removed from `OPEN_SESSIONS`
+2. `SessionManager.removeSession(sessionId)` removes the session record
+3. `AudioBuffer.clearSession(sessionId)` removes queued audio for that session
+
+One important detail for future cleanup work:
+
+`ProcessingSketch` does not currently remove that session's entries from all of its user-state maps at disconnect time.
+
+So the cleanup is currently strongest in:
+
+- `SessionManager`
+- `AudioBuffer`
+
+but not yet fully mirrored inside the sketch state maps.
 
 ## The Different Runtime Channels
 

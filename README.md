@@ -27,6 +27,7 @@ A multi-user web-based controller for Processing.org visual sketches. Multiple u
 - **Multi-user support**: Multiple concurrent browser clients
 - **Real-time WebSocket communication**: Low-latency bidirectional messaging
 - **Touch/mouse input**: Position tracking with visual feedback
+- **Keyboard input**: Desktop browser key events over the same WebSocket channel
 - **Audio streaming**: Per-user audio level visualization
 - **Phone motion input**: Tilt and shake from supported mobile browsers over HTTPS
 - **HTTPS/TLS**: Secure connections required for mobile microphone access
@@ -276,6 +277,9 @@ processing-server/
 |-- processing-server-ca.cer          # Exported CA certificate
 |-- config/
 |   `-- application-https.yaml        # HTTPS overlay config for -Dapp.config
+|-- generated-src/
+|   `-- main/java/com/processing/server/
+|       `-- ...                       # Reviewed generated sketches kept separate from handwritten server code
 |-- src/
 |   `-- main/
 |       |-- java/com/processing/server/
@@ -298,6 +302,11 @@ processing-server/
 
 `target/` is created by Maven after the first build. It is not part of the files cloned from GitHub.
 
+Generated-sketch workflow:
+- raw converter output belongs under `target/pde-output/...`
+- reviewed generated sketches that you want to compile with the app can live under `generated-src/main/java/...`
+- Maven compiles `generated-src/main/java` in addition to `src/main/java`
+
 ## Configuration
 
 Contents:
@@ -314,6 +323,7 @@ server:
   host: "127.0.0.1"                 # Local-only HTTP listener
 
 processing:
+  sketch-class: "com.processing.server.ProcessingSketch"  # Sketch class to launch
   width: 800                        # Canvas width
   height: 600                       # Canvas height
   fps: 60                           # Target frame rate
@@ -339,6 +349,25 @@ audio:
 debug:
   logging: false                    # Enable debug output
 ```
+
+`processing.sketch-class` lets you run a different sketch class without editing `Main.java`. The class must:
+
+- extend `PApplet`
+- provide the same constructor shape as `ProcessingSketch`
+- provide a public `runSketch()` method
+
+Example:
+
+```powershell
+java "-Dprocessing.sketch-class=com.processing.server.StarterSketch" -jar .\target\processing-server-1.0-SNAPSHOT.jar
+```
+
+`StarterSketch` is included as a minimal alternate sketch. It proves that the config switch works and reacts to browser touch, size-slider, and keyboard input.
+
+For reviewed converted sketches, keep the generated Java separate from the main server source tree:
+
+- raw converter output: `target/pde-output/<sketch-name>/`
+- launchable reviewed sketch classes: `generated-src/main/java/com/processing/server/`
 
 ### Motion Configuration
 
@@ -414,10 +443,17 @@ The web interface (`index.html`) provides:
 6. **Audio Gain Slider**: Attenuate or amplify how strongly incoming audio drives the sketch
 7. **Motion Input**: Enable phone motion sensors, view live tilt values, and send tilt/shake control over HTTPS
 8. **Motion Trim Slider**: Adjust motion sensitivity in the browser before motion samples are sent to the server
+9. **Keyboard Input**: When the page has focus on a desktop browser, arrow keys, WASD, space, and other key events are sent to the server
 
 The touch area uses `touch-action: none`, which helps avoid accidental browser text selection or gesture interference while dragging.
 
 The motion trim is a client-only setting. It scales the browser's outgoing motion sample before transmission, so different devices can feel less or more responsive without changing the shared server config.
+
+Keyboard notes:
+- keyboard input depends on page focus
+- the default sketch uses arrows or WASD to nudge the circle and space to trigger a burst
+- the browser UI also exposes the last key seen so you can confirm the protocol is active
+- if a custom sketch also keeps local Processing `keyPressed()` logic, that local keyboard path only works when the Processing window has focus
 
 ### Enabling Debug Mode
 
@@ -495,6 +531,17 @@ Connect to `ws://localhost:8080/ws` for local HTTP, or `wss://localhost:8443/ws`
   "ay": 0.4,
   "az": 1.0,
   "magnitude": 1.08,
+  "timestamp": 1234567890
+}
+```
+
+```json
+{
+  "type": "key",
+  "controlId": "keyboard",
+  "key": "ArrowLeft",
+  "keyCode": 37,
+  "action": "pressed",
   "timestamp": 1234567890
 }
 ```

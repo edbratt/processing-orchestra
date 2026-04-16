@@ -259,6 +259,17 @@
                     <div>Magnitude: <span id="motionMagnitudeValue">-</span></div>
                 </div>
             </div>
+
+            <div class="control-group">
+                <label>Keyboard Input</label>
+                <div style="font-size: 12px; color: #bbb; line-height: 1.5;">
+                    <div>Status: <span id="keyboardStatus">Waiting for page focus</span></div>
+                    <div>Last key: <span id="keyboardLastKey">-</span></div>
+                    <div style="margin-top: 8px; color: #888;">
+                        Desktop browsers can send arrow keys, WASD, space, and other key events while this page is focused.
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="status">
@@ -301,6 +312,7 @@
         let motionTrim = 1.0;
         let latestOrientationSample = null;
         let latestAccelerationSample = null;
+        const pressedKeys = new Map();
         
         // Check URL parameters for debug mode
         if (new URLSearchParams(window.location.search).has('debug')) {
@@ -393,6 +405,83 @@
 
             startButton.disabled = false;
             stopButton.disabled = true;
+        }
+
+        function updateKeyboardStatus(text) {
+            document.getElementById('keyboardStatus').textContent = text;
+        }
+
+        function shouldCaptureKeyboard(event) {
+            const tagName = event.target?.tagName;
+            return tagName !== 'INPUT'
+                && tagName !== 'TEXTAREA'
+                && tagName !== 'SELECT'
+                && tagName !== 'BUTTON';
+        }
+
+        function sendKeyEvent(action, event) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            const message = {
+                type: 'key',
+                controlId: 'keyboard',
+                key: event.key || '',
+                keyCode: event.keyCode || 0,
+                action,
+                timestamp: Date.now()
+            };
+
+            ws.send(JSON.stringify(message));
+            eventCount++;
+            document.getElementById('eventCount').textContent = eventCount;
+            document.getElementById('keyboardLastKey').textContent = message.key || String(message.keyCode);
+        }
+
+        function handleKeyDown(event) {
+            if (!shouldCaptureKeyboard(event)) {
+                return;
+            }
+
+            if (event.repeat || pressedKeys.has(event.code)) {
+                return;
+            }
+
+            pressedKeys.set(event.code, {
+                key: event.key || '',
+                keyCode: event.keyCode || 0
+            });
+            if (event.key.startsWith('Arrow') || event.key === ' ' || event.key === 'Spacebar') {
+                event.preventDefault();
+            }
+            updateKeyboardStatus('Sending key events');
+            sendKeyEvent('pressed', event);
+        }
+
+        function handleKeyUp(event) {
+            if (!shouldCaptureKeyboard(event)) {
+                return;
+            }
+
+            pressedKeys.delete(event.code);
+            if (event.key.startsWith('Arrow') || event.key === ' ' || event.key === 'Spacebar') {
+                event.preventDefault();
+            }
+            sendKeyEvent('released', event);
+        }
+
+        function releaseAllKeys() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                for (const [code, keyEvent] of pressedKeys.entries()) {
+                    sendKeyEvent('released', {
+                        key: keyEvent.key,
+                        keyCode: keyEvent.keyCode
+                    });
+                }
+            }
+            pressedKeys.clear();
+            updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
         }
 
         function clampSigned(value, maxAbs) {
@@ -1005,11 +1094,16 @@
         document.getElementById('btnStopAudio').addEventListener('click', stopAudio);
         document.getElementById('btnStartMotion').addEventListener('click', startMotion);
         document.getElementById('btnStopMotion').addEventListener('click', stopMotion);
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('focus', () => updateKeyboardStatus('Ready'));
+        window.addEventListener('blur', releaseAllKeys);
         
         // Initialize
         updateAudioUI();
         detectMotionSupport();
         document.getElementById('motionTrimValue').textContent = formatMotionTrimLabel(50);
+        updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
         connect();
     </script>
 </body>

@@ -13,6 +13,9 @@ public record UserInputEvent(
     float value,
     float x,
     float y,
+    String keyText,
+    int keyCode,
+    String keyAction,
     float alpha,
     float beta,
     float gamma,
@@ -29,7 +32,17 @@ public record UserInputEvent(
                           float x,
                           float y,
                           long timestamp) {
-        this(sessionId, eventType, controlId, value, x, y, 0f, 0f, 0f, 0f, 0f, 0f, 0f, timestamp);
+        this(sessionId, eventType, controlId, value, x, y, "", 0, "", 0f, 0f, 0f, 0f, 0f, 0f, 0f, timestamp);
+    }
+
+    public UserInputEvent(String sessionId,
+                          String eventType,
+                          String controlId,
+                          String keyText,
+                          int keyCode,
+                          String keyAction,
+                          long timestamp) {
+        this(sessionId, eventType, controlId, 0f, 0f, 0f, keyText, keyCode, keyAction, 0f, 0f, 0f, 0f, 0f, 0f, 0f, timestamp);
     }
 
     public static UserInputEvent fromJson(JsonObject json) {
@@ -40,6 +53,9 @@ public record UserInputEvent(
             (float) json.doubleValue("value", 0.0),
             (float) json.doubleValue("x", 0.0),
             (float) json.doubleValue("y", 0.0),
+            json.stringValue("key", ""),
+            json.intValue("keyCode", 0),
+            json.stringValue("action", ""),
             (float) json.doubleValue("alpha", 0.0),
             (float) json.doubleValue("beta", 0.0),
             (float) json.doubleValue("gamma", 0.0),

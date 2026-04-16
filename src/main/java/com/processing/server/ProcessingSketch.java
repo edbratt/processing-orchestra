@@ -33,6 +33,7 @@ public class ProcessingSketch extends PApplet {
     private final Map<String, Float> userHueVelocities = new HashMap<>();
     private final Map<String, float[]> userMotion = new HashMap<>();
     private final Map<String, Float> userLastMotionMagnitudes = new HashMap<>();
+    private final Map<String, Map<Integer, Boolean>> userKeyStates = new HashMap<>();
     
     private float globalAudioLevel = 0;
     private float smoothedGlobalAudioLevel = 0;
@@ -137,7 +138,53 @@ public class ProcessingSketch extends PApplet {
                 }
                 handleMotionEvent(sessionId, event);
             }
+            case "key" -> {
+                // Keyboard events come from the focused browser page. They are available for
+                // custom sketches, and the default sketch uses arrows/WASD and space as a small
+                // built-in example.
+                if (!userPositions.containsKey(sessionId)) {
+                    initializeUser(sessionId);
+                }
+                handleKeyEvent(sessionId, event);
+            }
         }
+    }
+
+    private void handleKeyEvent(String sessionId, UserInputEvent event) {
+        Map<Integer, Boolean> keyStates = userKeyStates.computeIfAbsent(sessionId, key -> new HashMap<>());
+        boolean pressed = "pressed".equals(event.keyAction());
+        keyStates.put(event.keyCode(), pressed);
+
+        if (!pressed) {
+            return;
+        }
+
+        float[] targetPos = userTargetPositions.get(sessionId);
+        float step = 0.04f;
+
+        switch (normalizeKey(event.keyText(), event.keyCode())) {
+            case "ArrowLeft", "a", "A" -> targetPos[0] = constrain(targetPos[0] - step, 0.05f, 0.95f);
+            case "ArrowRight", "d", "D" -> targetPos[0] = constrain(targetPos[0] + step, 0.05f, 0.95f);
+            case "ArrowUp", "w", "W" -> targetPos[1] = constrain(targetPos[1] - step, 0.1f, 0.9f);
+            case "ArrowDown", "s", "S" -> targetPos[1] = constrain(targetPos[1] + step, 0.1f, 0.9f);
+            case " ", "Space", "Spacebar" -> userPulseBoosts.put(sessionId, max(userPulseBoosts.getOrDefault(sessionId, 0f), 0.8f));
+            default -> {
+            }
+        }
+    }
+
+    private String normalizeKey(String keyText, int keyCode) {
+        if (keyText != null && !keyText.isBlank()) {
+            return keyText;
+        }
+        return switch (keyCode) {
+            case 37 -> "ArrowLeft";
+            case 38 -> "ArrowUp";
+            case 39 -> "ArrowRight";
+            case 40 -> "ArrowDown";
+            case 32 -> " ";
+            default -> "";
+        };
     }
 
     private void handleMotionEvent(String sessionId, UserInputEvent event) {
@@ -240,6 +287,7 @@ public class ProcessingSketch extends PApplet {
         userHueVelocities.put(sessionId, 0f);
         userMotion.put(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
         userLastMotionMagnitudes.put(sessionId, 0f);
+        userKeyStates.put(sessionId, new HashMap<>());
         
         if (debugConfig.isLogging()) {
             println("Initialized user " + sessionId.substring(0, 8) + " at position (" 

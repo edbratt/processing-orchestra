@@ -74,6 +74,7 @@ public class WebSocketHandler implements WsListener {
             switch (messageType) {
                 case "audio-config" -> handleAudioConfig(json, session);
                 case "touch", "slider", "button" -> handleControlEvent(json);
+                case "key" -> handleKeyEvent(json);
                 case "motion" -> handleMotionEvent(json);
                 default -> session.send("{\"error\":\"unknown message type\"}", true);
             }
@@ -130,6 +131,22 @@ public class WebSocketHandler implements WsListener {
         eventQueue.push(event);
     }
 
+    private void handleKeyEvent(JsonObject json) {
+        long timestamp = json.numberValue("timestamp").map(number -> number.longValue()).orElse(System.currentTimeMillis());
+
+        UserInputEvent event = new UserInputEvent(
+            sessionId,
+            "key",
+            json.stringValue("controlId", "keyboard"),
+            json.stringValue("key", ""),
+            json.intValue("keyCode", 0),
+            json.stringValue("action", "pressed"),
+            timestamp
+        );
+
+        eventQueue.push(event);
+    }
+
     private void handleMotionEvent(JsonObject json) {
         float alpha = clampSignedAngle(getFloat(json, "alpha", 0.0), motionConfig.getAlphaClampDegrees());
         float beta = clampSignedAngle(getFloat(json, "beta", 0.0), motionConfig.getBetaClampDegrees());
@@ -147,6 +164,9 @@ public class WebSocketHandler implements WsListener {
             0f,
             0f,
             0f,
+            "",
+            0,
+            "",
             alpha,
             beta,
             gamma,

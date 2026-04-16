@@ -4,6 +4,7 @@
  */
 package com.processing.server;
 
+import java.lang.reflect.Constructor;
 import java.util.List;
 
 import io.helidon.config.Config;
@@ -18,6 +19,7 @@ public final class Main {
     private static final String APP_CONFIG_PROPERTY = "app.config";
     private static final String DEFAULT_CONFIG_RESOURCE = "application.yaml";
     private static final String TLS_SOCKET_NAME = "tls";
+    private static final String DEFAULT_SKETCH_CLASS = "com.processing.server.ProcessingSketch";
 
     private Main() {
     }
@@ -46,8 +48,8 @@ public final class Main {
         int width = config.get("processing.width").asInt().orElse(800);
         int height = config.get("processing.height").asInt().orElse(600);
 
-        ProcessingSketch sketch = new ProcessingSketch(eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
-        sketch.runSketch();
+        String sketchClassName = config.get("processing.sketch-class").asString().orElse(DEFAULT_SKETCH_CLASS);
+        startSketch(sketchClassName, eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
 
         InputService inputService = new InputService(sessionManager, eventQueue, audioBuffer);
         // Attach WebSocket handling to every listener we expose so the browser UI and sketch
@@ -86,6 +88,7 @@ public final class Main {
                 + motionConfig.getBetaClampDegrees() + "°, gamma "
                 + motionConfig.getGammaClampDegrees() + "°, magnitude "
                 + motionConfig.getMagnitudeClampG() + "g");
+        System.out.println("Sketch class: " + sketchClassName);
         System.out.println("Debug logging: " + (debugConfig.isLogging() ? "enabled" : "disabled"));
     }
 
@@ -130,6 +133,34 @@ public final class Main {
             config.get("motion.debug.logging").asBoolean().orElse(false),
             config.get("motion.debug.sample-limit").asInt().orElse(5)
         );
+    }
+
+    private static void startSketch(String sketchClassName,
+                                    EventQueue eventQueue,
+                                    AudioBuffer audioBuffer,
+                                    int width,
+                                    int height,
+                                    DebugConfig debugConfig,
+                                    MotionConfig motionConfig) {
+        try {
+            Class<?> sketchClass = Class.forName(sketchClassName);
+            if (!processing.core.PApplet.class.isAssignableFrom(sketchClass)) {
+                throw new IllegalArgumentException("Sketch class must extend processing.core.PApplet: " + sketchClassName);
+            }
+
+            Constructor<?> constructor = sketchClass.getConstructor(
+                EventQueue.class,
+                AudioBuffer.class,
+                int.class,
+                int.class,
+                DebugConfig.class,
+                MotionConfig.class
+            );
+            Object sketch = constructor.newInstance(eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
+            sketchClass.getMethod("runSketch").invoke(sketch);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to start sketch class " + sketchClassName, e);
+        }
     }
 
     static void routing(HttpRouting.Builder builder, InputService inputService) {

@@ -75,6 +75,7 @@ Remaining follow-up:
 
 - [ ] Make Processing sketch customizable via configuration
 - [ ] Add user presence indicators (join/leave animations)
+- [ ] Remove sketch-side visualization/state for sessions after their WebSocket connection closes
 - [ ] Support multiple visualization modes
 - [ ] Add server-side audio mixing option (currently per-user only)
 

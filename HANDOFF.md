@@ -2,15 +2,22 @@
 
 ## Current State
 
-The project is in a working state for both local HTTP use and optional LAN/mobile HTTPS use.
+The project is in a working state for:
 
-What is working:
-- Local HTTP UI on `http://localhost:8080/`
-- Optional HTTPS UI on `https://YOUR_IP:8443/` or `https://YOUR_HOSTNAME.local:8443/`
-- Processing sketch startup from the normal interactive run scripts
-- Browser controls driving the Processing sketch
-- Browser microphone capture feeding the server-side audio-reactive visuals
-- Clean WebSocket shutdown notifications in the browser
+- local HTTP use on `http://localhost:8080/`
+- optional LAN/mobile HTTPS use on `https://YOUR_IP:8443/` or `https://YOUR_HOSTNAME.local:8443/`
+- browser-driven Processing sketch control
+- browser microphone capture feeding audio-reactive visuals
+- browser motion input from supported phones over HTTPS
+
+The current browser/visual feature set includes:
+
+- touch input
+- sliders for size, speed, audio gain, and motion trim
+- buttons for `Burst`, `Spin Color`, and `Scatter`
+- microphone audio input
+- phone motion input with tilt and shake behavior
+- disconnect and shutdown notifications in the browser
 
 ## Main Decisions Made
 
@@ -19,8 +26,8 @@ What is working:
 We moved away from asking users to manually uncomment YAML blocks.
 
 Current approach:
-- Base config lives in `src/main/resources/application.yaml`
-- Optional HTTPS overlay lives in `config/application-https.yaml`
+- base config lives in `src/main/resources/application.yaml`
+- optional HTTPS overlay lives in `config/application-https.yaml`
 - HTTPS is enabled at runtime with `-Dapp.config=config/application-https.yaml`
 - `run.ps1` and `run.sh` start local HTTP
 - `run-https.ps1` and `run-https.sh` start HTTP + HTTPS
@@ -51,7 +58,7 @@ We kept `processing-server` as an executable shaded jar rather than reverting to
 Current approach:
 - app builds to `target/processing-server-1.0-SNAPSHOT.jar`
 - users can launch with `java -jar`
-- scripts discover and run the packaged jar
+- scripts discover and run the newest packaged jar automatically
 
 Why:
 - this app behaves more like a runnable desktop/server tool than a minimal framework example
@@ -59,12 +66,15 @@ Why:
 
 ### WebSocket Model
 
-The app uses one shared `/ws` connection per browser client with two logical streams:
+The app uses one shared `/ws` connection per browser client with multiple logical payload types:
+
 - JSON control events
+- JSON motion events
 - binary audio frames
 
-Important fix made:
+Important fixes made:
 - `WebSocketHandler` must be created per connection, not reused as one mutable shared instance
+- the `/ws` route must be attached on both the default HTTP listener and the optional TLS listener
 
 This was the key fix for the earlier symptom where:
 - the page loaded
@@ -87,9 +97,9 @@ We removed the temporary forced window visibility/location tweak after confirmin
 
 ### Control Semantics
 
-- `Size` slider now changes the core circle size
-- outer audio ring scales proportionally from that base size
-- `Speed` slider now changes movement responsiveness and effect decay speed
+- `Size` slider changes the core circle size
+- the outer audio ring scales proportionally from that base size
+- `Speed` changes movement responsiveness and effect decay speed
 
 ### Button Behavior
 
@@ -108,6 +118,23 @@ Current behavior:
 - slider attenuates or amplifies incoming audio before it affects visuals
 - label is shown in dB-style terms rather than raw percent
 
+### Motion Input
+
+Added phone motion input over the existing WebSocket path.
+
+Current behavior:
+- browser has `Enable Motion` / `Stop Motion` controls
+- browser requests motion/orientation permission when needed
+- browser combines the latest orientation and acceleration data into a timed `motion` sample
+- server clamps and queues motion samples using `MotionConfig`
+- sketch uses tilt for positional offset and shake for burst-like effects
+- browser-side `Motion Trim` changes motion sensitivity locally without requiring a rebuild
+
+Important implementation details:
+- motion update rate, clamp values, mapping values, and debug logging are configurable
+- motion config currently lives in `src/main/resources/application.yaml`
+- because that file is packaged into the jar, changing those settings requires a rebuild
+
 ### Disconnect and Shutdown UX
 
 Added client notification behavior for disconnects and shutdowns:
@@ -117,30 +144,41 @@ Added client notification behavior for disconnects and shutdowns:
 
 ## Documentation Changes
 
-Docs were updated to match the new system:
+Docs were updated to match the current system:
 - `README.md`
 - `ARCHITECTURE.md`
+- `CUSTOMIZATION.md`
 - `CHANGELOG.md`
+- `MOTION_INPUT_PLAN.md`
+- `RUNTIME_OVERVIEW.md`
 
 Current doc direction:
 - describe only the current supported workflow
 - avoid historical/migration notes unless they are still operationally relevant
-- use Mermaid for architecture diagrams instead of fragile text box diagrams
+- use Mermaid where it helps, but keep explanatory text near the diagrams
+- add navigation with a top-level table of contents and local `Contents:` blocks for large docs
+
+### New Docs Added
+
+- `MOTION_INPUT_PLAN.md`
+  evaluation of phone motion vs. geolocation/position, plus an implementation work list
+- `RUNTIME_OVERVIEW.md`
+  plain-English explanation of how the runtime is wired together, tied directly to the source files
+- `HANDOFF.md`
+  this ongoing resume point for future sessions
 
 ## Architecture Doc Status
 
-`ARCHITECTURE.md` was rebuilt into a clean Markdown-only version.
+`ARCHITECTURE.md` is in a much better state than before:
 
-It now includes:
-- Mermaid architecture diagrams
-- explicit distinction between structural architecture and runtime data flow
-- component walkthrough for main server classes
-- current HTTP/HTTPS config model
-- current packaging and runtime model
+- Mermaid diagrams replace the old broken box layouts
+- the main architecture vs. data-flow distinction is now explicit
+- the diagrams show one WebSocket channel with separate conceptual JSON and binary audio streams
+- descriptive detail from the old text diagrams was redistributed into the component sections
+- a top-level TOC and section-local `Contents:` blocks were added
 
-One follow-up item remains:
-- some Mermaid nodes may still be visually cramped depending on the renderer
-- likely fix is to insert more line breaks into long node labels if GitHub preview still truncates text
+Remaining note:
+- some Mermaid node labels may still benefit from additional line breaks if GitHub preview truncates text
 
 ## Verified Behavior
 
@@ -151,21 +189,41 @@ Verified during this round:
 - browser UI loads on both ports
 - controls affect the Processing sketch
 - audio path drives the visual response
+- motion path sends from supported phones and affects the sketch
 - run scripts and HTTPS scripts work with the current packaging/config setup
 
-## Things To Watch
+## Source Files That Matter Most
 
-### Untracked Local Files
+If resuming technical work, these are the main files to read first:
 
-Current local-only files that are not in the repo:
+- `src/main/java/com/processing/server/Main.java`
+- `src/main/java/com/processing/server/WebSocketHandler.java`
+- `src/main/java/com/processing/server/ProcessingSketch.java`
+- `src/main/java/com/processing/server/MotionConfig.java`
+- `src/main/java/com/processing/server/UserInputEvent.java`
+- `src/main/resources/application.yaml`
+- `src/main/resources/static/index.html`
+
+Useful support docs:
+
+- `README.md`
+- `ARCHITECTURE.md`
+- `CUSTOMIZATION.md`
+- `MOTION_INPUT_PLAN.md`
+- `RUNTIME_OVERVIEW.md`
+
+## Current Working Tree Notes
+
+At the time of this handoff, the intentionally local files still outside the repo are:
+
 - `note.md`
 - `processing-server-ca.cer`
 
-We also added ignore rules for:
+Ignore rules were added for:
 - `.codex*`
 - `.tmp-*/`
 
-### Certificate/IP Reality
+## Certificate/IP Reality
 
 The certificate must match the actual LAN identity in use.
 
@@ -179,13 +237,14 @@ If the network changes:
 ## Suggested Next Session Starting Points
 
 Good candidates for the next session:
-1. Tidy Mermaid node labels if GitHub still truncates text.
-2. Decide whether `processing-server-ca.cer` should also be ignored in `.gitignore`.
-3. Do a final polish pass on README and Architecture side by side for consistency.
-4. Consider whether to add release tagging/versioning now that the workflow is stable.
+1. Decide whether motion tuning should move out of `src/main/resources/application.yaml` into an external runtime config so rebuilds are not needed for mapping changes.
+2. Tidy Mermaid node labels if GitHub still truncates text.
+3. Decide whether `processing-server-ca.cer` should also be ignored in `.gitignore`.
+4. Review the motion mapping in the sketch and decide whether tilt/shake should drive additional visual properties.
+5. Commit and push the currently prepared docs/runtime changes if that has not already been done.
 
 ## Recommended Restart Context
 
 If resuming later, the shortest accurate summary is:
 
-This repo now runs locally on HTTP by default and optionally on HTTPS using `-Dapp.config=config/application-https.yaml`. The keystore is external at the project root, not bundled into the jar. The app is packaged as an executable shaded jar. The important bug fix was making WebSocket handlers per-connection and wiring `/ws` on both default and TLS sockets. The Processing sketch, browser controls, audio gain, and shutdown messaging are all working. The main remaining polish item is Mermaid diagram readability.
+This repo now runs locally on HTTP by default and optionally on HTTPS using `-Dapp.config=config/application-https.yaml`. The keystore is external at the project root, not bundled into the jar. The app is packaged as an executable shaded jar. The important bug fixes were making WebSocket handlers per-connection and wiring `/ws` on both default and TLS sockets. Browser controls, audio gain, motion input, and shutdown messaging are all working. The main remaining polish items are motion-config ergonomics, Mermaid readability, and commit/ignore cleanup around local certificate artifacts.
