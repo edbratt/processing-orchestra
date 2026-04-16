@@ -443,7 +443,7 @@ The web interface (`index.html`) provides:
 6. **Audio Gain Slider**: Attenuate or amplify how strongly incoming audio drives the sketch
 7. **Motion Input**: Enable phone motion sensors, view live tilt values, and send tilt/shake control over HTTPS
 8. **Motion Trim Slider**: Adjust motion sensitivity in the browser before motion samples are sent to the server
-9. **Keyboard Input**: When the page has focus on a desktop browser, arrow keys, WASD, space, and other key events are sent to the server
+9. **Keyboard Input**: Desktop browsers can send key events while the page has focus, and phones/tablets can open a compact on-screen keyboard with `Tap for simple keyboard input`
 
 The touch area uses `touch-action: none`, which helps avoid accidental browser text selection or gesture interference while dragging.
 
@@ -451,9 +451,11 @@ The motion trim is a client-only setting. It scales the browser's outgoing motio
 
 Keyboard notes:
 - keyboard input depends on page focus
+- on phones and tablets, use `Tap for simple keyboard input` to focus the compact keyboard field and open the on-screen keyboard
 - the default sketch uses arrows or WASD to nudge the circle and space to trigger a burst
 - the browser UI also exposes the last key seen so you can confirm the protocol is active
 - if a custom sketch also keeps local Processing `keyPressed()` logic, that local keyboard path only works when the Processing window has focus
+- mobile soft keyboards are best for simple character input; important mobile controls should still prefer buttons, sliders, and touch
 
 ### Enabling Debug Mode
 

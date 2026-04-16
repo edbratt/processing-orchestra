@@ -98,6 +98,32 @@
             color: #666;
             cursor: not-allowed;
         }
+        .keyboard-panel {
+            display: none;
+            margin-top: 10px;
+        }
+        .keyboard-panel.open {
+            display: block;
+        }
+        .keyboard-input-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .keyboard-input {
+            flex: 1;
+            min-width: 0;
+            padding: 12px;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            background: #0f1b33;
+            color: #eee;
+            font-size: 16px;
+            outline: none;
+        }
+        .keyboard-input:focus {
+            border-color: #00d9ff;
+        }
         .audio-controls {
             margin-top: 15px;
             padding-top: 15px;
@@ -265,8 +291,22 @@
                 <div style="font-size: 12px; color: #bbb; line-height: 1.5;">
                     <div>Status: <span id="keyboardStatus">Waiting for page focus</span></div>
                     <div>Last key: <span id="keyboardLastKey">-</span></div>
-                    <div style="margin-top: 8px; color: #888;">
-                        Desktop browsers can send arrow keys, WASD, space, and other key events while this page is focused.
+                    <div style="margin-top: 8px;">
+                        <button id="btnOpenKeyboard">Tap for simple keyboard input</button>
+                    </div>
+                    <div class="keyboard-panel" id="keyboardPanel">
+                        <div class="keyboard-input-row">
+                            <input
+                                type="text"
+                                id="mobileKeyboardInput"
+                                class="keyboard-input"
+                                placeholder="Type here"
+                                autocomplete="off"
+                                autocapitalize="off"
+                                autocorrect="off"
+                                spellcheck="false">
+                            <button id="btnHideKeyboard">Hide</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -313,6 +353,7 @@
         let latestOrientationSample = null;
         let latestAccelerationSample = null;
         const pressedKeys = new Map();
+        let mobileKeyboardOpen = false;
         
         // Check URL parameters for debug mode
         if (new URLSearchParams(window.location.search).has('debug')) {
@@ -411,6 +452,11 @@
             document.getElementById('keyboardStatus').textContent = text;
         }
 
+        function setKeyboardPanelOpen(isOpen) {
+            mobileKeyboardOpen = isOpen;
+            document.getElementById('keyboardPanel').classList.toggle('open', isOpen);
+        }
+
         function shouldCaptureKeyboard(event) {
             const tagName = event.target?.tagName;
             return tagName !== 'INPUT'
@@ -437,6 +483,22 @@
             eventCount++;
             document.getElementById('eventCount').textContent = eventCount;
             document.getElementById('keyboardLastKey').textContent = message.key || String(message.keyCode);
+        }
+
+        function sendSyntheticKeyTap(key, keyCode = 0) {
+            sendKeyEvent('pressed', { key, keyCode });
+            sendKeyEvent('released', { key, keyCode });
+        }
+
+        function keyCodeForCharacter(character) {
+            if (!character) {
+                return 0;
+            }
+            if (character === ' ') {
+                return 32;
+            }
+            const code = character.toUpperCase().charCodeAt(0);
+            return Number.isNaN(code) ? 0 : code;
         }
 
         function handleKeyDown(event) {
@@ -481,7 +543,24 @@
                 }
             }
             pressedKeys.clear();
-            updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
+            if (!mobileKeyboardOpen || document.activeElement?.id !== 'mobileKeyboardInput') {
+                updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
+            }
+        }
+
+        function openMobileKeyboard() {
+            setKeyboardPanelOpen(true);
+            const input = document.getElementById('mobileKeyboardInput');
+            input.value = '';
+            input.focus();
+        }
+
+        function closeMobileKeyboard() {
+            const input = document.getElementById('mobileKeyboardInput');
+            input.blur();
+            input.value = '';
+            setKeyboardPanelOpen(false);
+            releaseAllKeys();
         }
 
         function clampSigned(value, maxAbs) {
@@ -1094,6 +1173,38 @@
         document.getElementById('btnStopAudio').addEventListener('click', stopAudio);
         document.getElementById('btnStartMotion').addEventListener('click', startMotion);
         document.getElementById('btnStopMotion').addEventListener('click', stopMotion);
+        document.getElementById('btnOpenKeyboard').addEventListener('click', openMobileKeyboard);
+        document.getElementById('btnHideKeyboard').addEventListener('click', closeMobileKeyboard);
+        document.getElementById('mobileKeyboardInput').addEventListener('focus', () => {
+            setKeyboardPanelOpen(true);
+            updateKeyboardStatus('Keyboard active');
+        });
+        document.getElementById('mobileKeyboardInput').addEventListener('blur', () => {
+            if (!document.hasFocus()) {
+                return;
+            }
+            updateKeyboardStatus('Ready');
+        });
+        document.getElementById('mobileKeyboardInput').addEventListener('keydown', (event) => {
+            if (event.key === 'Backspace' || event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                updateKeyboardStatus('Keyboard active');
+                sendSyntheticKeyTap(event.key === ' ' ? ' ' : event.key, event.keyCode || keyCodeForCharacter(event.key));
+                event.target.value = '';
+            }
+        });
+        document.getElementById('mobileKeyboardInput').addEventListener('input', (event) => {
+            const value = event.target.value;
+            if (!value) {
+                return;
+            }
+
+            updateKeyboardStatus('Keyboard active');
+            for (const character of value) {
+                sendSyntheticKeyTap(character, keyCodeForCharacter(character));
+            }
+            event.target.value = '';
+        });
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
         window.addEventListener('focus', () => updateKeyboardStatus('Ready'));

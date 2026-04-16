@@ -284,6 +284,7 @@ What it does:
 - listens for `keydown` and `keyup` on the focused page
 - sends `type: "key"` events over WebSocket
 - ignores range sliders and buttons so normal UI keyboard use still works
+- includes a compact mobile keyboard field opened by `Tap for simple keyboard input`
 
 If you want to customize it, start in:
 
@@ -297,6 +298,7 @@ Look for:
 
 Important:
 - browser keyboard input only works when the browser page has focus
+- on phones and tablets, the compact keyboard field is the intended way to open the on-screen keyboard
 - local Processing `keyPressed()` or `keyReleased()` code only works when the Processing sketch window has focus
 - a custom sketch can support one path or both, depending on how you want students to interact with it
 
