@@ -302,6 +302,29 @@ Important:
 - local Processing `keyPressed()` or `keyReleased()` code only works when the Processing sketch window has focus
 - a custom sketch can support one path or both, depending on how you want students to interact with it
 
+#### 6. Session Name
+
+Session naming is also wired into the browser client.
+
+What it does:
+- lets a browser client send a short display name for its current session
+- stores that name in browser `localStorage` so it can be resent on reconnect
+- updates `SessionManager` so the sketch and `/api/status` can see the saved name
+
+If you want to customize it, start in:
+
+- `src/main/resources/static/index.html`
+
+Look for:
+
+- `sessionNameInput`
+- `btnSaveSessionName`
+- `sendSessionMetaUpdate()`
+
+On the server side, the matching hook is:
+
+- `WebSocketHandler.handleSessionMeta(...)`
+
 ---
 
 ## Creating Your Own Processing Sketch
@@ -507,6 +530,8 @@ The most useful methods are:
   use this if you want to remap browser keyboard input, drop repeat-style events, or translate keys into higher-level commands before they reach the sketch
 - `handleMotionEvent(JsonObject json)`
   use this if you want to clamp motion differently, calculate new motion fields, or reject noisy input
+- `handleSessionMeta(JsonObject json, WsSession session)`
+  use this if you want to validate or transform browser-provided session metadata such as the display name
 - `onMessage(WsSession session, BufferData buffer, boolean last)`
   this is the entry point for binary audio frames from the browser
 
@@ -533,6 +558,21 @@ private byte[] processIncomingAudio(String sessionId, byte[] audioData) {
     return audioData;
 }
 ```
+
+For session tracking and metadata, look at:
+
+- `src/main/java/com/processing/server/SessionManager.java`
+
+The most useful methods are:
+
+- `createSession()`
+  use this if you want to change what metadata is created by default for each new browser client
+- `updateSessionName(String sessionId, String name)`
+  use this if you want to validate, normalize, or extend how browser-provided display names are stored
+- `removeSession(String sessionId)`
+  use this if you want to coordinate additional cleanup with session shutdown
+- `snapshotSessions()`
+  use this if you want to inspect session metadata for status pages or diagnostics
 
 That helper would fit naturally inside `WebSocketHandler.onMessage(... BufferData ...)` before `audioBuffer.push(...)`.
 
@@ -563,6 +603,8 @@ The main places to look are:
   use this if you want browser keyboard input to affect your sketch directly
 - `handleMotionEvent(String sessionId, UserInputEvent event)`
   use this if you want to change how tilt and shake are interpreted
+- `removeUser(String sessionId)`
+  this is where sketch-side state and visuals are removed when a session ends
 - `processAudio()`
   this is the main loop for pulling queued audio into sketch-side state
 - `calculateAudioLevel(String sessionId)`
@@ -617,6 +659,7 @@ Keyboard note:
 - browser `key` events arrive through `WebSocketHandler` and `EventQueue`
 - local Processing keyboard input does not go through Helidon or the browser at all
 - if you preserve local Processing keyboard handlers from a PDE sketch, those handlers remain separate from the browser keyboard protocol
+- session display names come through the browser/WebSocket path, not the local Processing input path
 
 ---
 

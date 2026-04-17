@@ -9,6 +9,9 @@ The project is in a working state for:
 - browser-driven Processing sketch control
 - browser microphone capture feeding audio-reactive visuals
 - browser motion input from supported phones over HTTPS
+- browser keyboard input on desktop and compact mobile keyboard input on phones/tablets
+- session metadata with a browser-defined display name
+- sketch-side cleanup when a browser session disconnects
 
 The current browser/visual feature set includes:
 
@@ -17,6 +20,8 @@ The current browser/visual feature set includes:
 - buttons for `Burst`, `Spin Color`, and `Scatter`
 - microphone audio input
 - phone motion input with tilt and shake behavior
+- browser keyboard input
+- per-session display names
 - disconnect and shutdown notifications in the browser
 
 ## Main Decisions Made
@@ -142,6 +147,38 @@ Added client notification behavior for disconnects and shutdowns:
 - browser shows a useful banner
 - page scrolls back to the top so the message is visible
 
+### Session Metadata And Cleanup
+
+Added session metadata and symmetric cleanup behavior.
+
+Current behavior:
+- the browser UI includes a session-name field and save button
+- the saved name is kept in browser `localStorage` and resent on reconnect
+- the server accepts `session-meta` messages and stores the name in `SessionManager`
+- the default sketch uses the saved name as the on-canvas label when available
+- `/api/status` now reports session metadata, including the saved name
+- when a WebSocket session closes or errors, the server pushes a `session-ended` event
+- `ProcessingSketch` removes all per-session visual state when that event arrives
+- explicit REST session removal also clears audio and removes sketch-side state
+
+Main files involved:
+- `src/main/java/com/processing/server/SessionManager.java`
+- `src/main/java/com/processing/server/WebSocketHandler.java`
+- `src/main/java/com/processing/server/UserInputEvent.java`
+- `src/main/java/com/processing/server/ProcessingSketch.java`
+- `src/main/java/com/processing/server/InputService.java`
+- `src/main/resources/static/index.html`
+
+### Mobile Keyboard Affordance
+
+Added a compact browser-side mobile keyboard affordance.
+
+Current behavior:
+- desktop browsers still use normal page-focus keyboard input
+- phones/tablets can use `Tap for simple keyboard input`
+- that opens a small visible input field and forwards simple key taps into the existing browser keyboard event path
+- this is meant for modest mobile keyboard usage, not full desktop-style keyboard control
+
 ## Documentation Changes
 
 Docs were updated to match the current system:
@@ -157,6 +194,20 @@ Current doc direction:
 - avoid historical/migration notes unless they are still operationally relevant
 - use Mermaid where it helps, but keep explanatory text near the diagrams
 - add navigation with a top-level table of contents and local `Contents:` blocks for large docs
+
+Recent doc additions/updates relevant to the latest session:
+- `README.md`
+  now describes session names, `session-meta` messages, and richer `/api/status` output
+- `CUSTOMIZATION.md`
+  now points to the session-name browser UI, `handleSessionMeta(...)`, `SessionManager`, and `removeUser(...)`
+- `ARCHITECTURE.md`
+  now describes session metadata and sketch-side disconnect cleanup
+- `RUNTIME_OVERVIEW.md`
+  now explains that sketch-side state is removed on disconnect
+- `PROCESSING_ORCHESTRA_LIBRARY_GUIDE.md`
+  new lighter first-pass guide for the planned Processing IDE library
+- `PROCESSING_ORCHESTRA_LIBRARY_SPEC.md`
+  still holds the more detailed implementation-oriented library design
 
 ### New Docs Added
 
@@ -190,6 +241,10 @@ Verified during this round:
 - controls affect the Processing sketch
 - audio path drives the visual response
 - motion path sends from supported phones and affects the sketch
+- browser keyboard input works
+- compact mobile keyboard input works for simple keys
+- session names are accepted and stored
+- disconnect cleanup removes sketch-side visuals
 - run scripts and HTTPS scripts work with the current packaging/config setup
 
 ## Source Files That Matter Most
@@ -211,6 +266,8 @@ Useful support docs:
 - `CUSTOMIZATION.md`
 - `MOTION_INPUT_PLAN.md`
 - `RUNTIME_OVERVIEW.md`
+- `PROCESSING_ORCHESTRA_LIBRARY_GUIDE.md`
+- `PROCESSING_ORCHESTRA_LIBRARY_SPEC.md`
 
 ## Current Working Tree Notes
 
@@ -237,14 +294,21 @@ If the network changes:
 ## Suggested Next Session Starting Points
 
 Good candidates for the next session:
-1. Decide whether motion tuning should move out of `src/main/resources/application.yaml` into an external runtime config so rebuilds are not needed for mapping changes.
-2. Tidy Mermaid node labels if GitHub still truncates text.
-3. Decide whether `processing-server-ca.cer` should also be ignored in `.gitignore`.
-4. Review the motion mapping in the sketch and decide whether tilt/shake should drive additional visual properties.
-5. Commit and push the currently prepared docs/runtime changes if that has not already been done.
+1. Start the first pass implementation of the Processing IDE library, not the full feature set.
+2. For that library, begin with server-side support for a dedicated sketch-client event stream such as `/sketch-ws`.
+3. Then implement a minimal `OrchestraInput` library with:
+   - connection status
+   - session list
+   - touch state
+   - session name access
+4. After that minimal path works, add keyboard, sliders/buttons, and motion in that order.
+5. Keep audio out of the library first pass.
+6. If time remains later, decide whether motion tuning should move out of `src/main/resources/application.yaml` into external runtime config.
+7. Tidy Mermaid node labels if GitHub still truncates text.
+8. Decide whether `processing-server-ca.cer` should also be ignored in `.gitignore`.
 
 ## Recommended Restart Context
 
 If resuming later, the shortest accurate summary is:
 
-This repo now runs locally on HTTP by default and optionally on HTTPS using `-Dapp.config=config/application-https.yaml`. The keystore is external at the project root, not bundled into the jar. The app is packaged as an executable shaded jar. The important bug fixes were making WebSocket handlers per-connection and wiring `/ws` on both default and TLS sockets. Browser controls, audio gain, motion input, and shutdown messaging are all working. The main remaining polish items are motion-config ergonomics, Mermaid readability, and commit/ignore cleanup around local certificate artifacts.
+This repo now runs locally on HTTP by default and optionally on HTTPS using `-Dapp.config=config/application-https.yaml`. The keystore is external at the project root, not bundled into the jar. The app is packaged as an executable shaded jar. The important runtime fixes were making WebSocket handlers per-connection and wiring `/ws` on both default and TLS sockets. Browser controls, audio gain, motion input, keyboard input, session naming, and session cleanup are working. The next major task is the first pass of the Processing IDE library: keep it narrow, start with a dedicated sketch-client event stream plus a minimal `OrchestraInput` API, and leave audio out for now.

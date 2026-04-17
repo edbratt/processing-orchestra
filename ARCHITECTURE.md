@@ -255,7 +255,7 @@ Runtime orchestration details:
 
 Responsibilities:
 - Creates and tracks session IDs for connected browser clients.
-- Stores per-session metadata needed by the server and sketch.
+- Stores per-session metadata needed by the server and sketch, including a user-defined display name.
 - Removes session state when sockets close or error out.
 
 Why it matters:
@@ -290,6 +290,7 @@ Responsibilities:
 - Owns the `/ws` connection lifecycle.
 - Creates or associates the session for each connection.
 - Routes JSON control and motion messages to `EventQueue`.
+- Accepts session metadata updates such as the browser-provided display name.
 - Routes binary audio frames to `AudioBuffer`.
 - Broadcasts shutdown notices and cleans up sessions on close or error.
 
@@ -304,7 +305,7 @@ Transport model:
 Responsibilities:
 - Exposes inspection endpoints such as `/api/status`.
 - Provides a simpler HTTP entry point for diagnostics and automation.
-- Reports queue, session, and audio-buffer state without requiring a WebSocket client.
+- Reports queue, session, session-metadata, and audio-buffer state without requiring a WebSocket client.
 
 Relationship to WebSocket input:
 - REST is not the main real-time control path for the browser UI.
@@ -317,7 +318,7 @@ Responsibilities:
 - Owns the Processing window and render loop.
 - Drains queued input events inside `draw()`.
 - Polls per-session audio data and computes visual audio levels.
-- Maintains the user state maps used to render circles, colors, animation, and audio-reactive rings.
+- Maintains the user state maps used to render circles, colors, labels, animation, and audio-reactive rings.
 
 Audio pipeline details:
 - Incoming PCM is converted into per-user levels on the server side rather than streamed back to the browser.
@@ -329,6 +330,7 @@ Event semantics:
 - The speed slider controls how quickly circles move toward those targets and how fast temporary effects decay.
 - Buttons trigger short-lived visual behaviors such as burst, spin color, and scatter.
 - Motion events are handled in `handleMotionEvent()`, where tilt is stored as per-session motion state and shake intensity is converted into a pulse boost.
+- Session metadata events are handled in `handleEvent()`, where the saved display name is stored for labeling and `session-ended` triggers sketch-side cleanup.
 
 Visual model details:
 - Each session owns a core circle plus an outer audio-reactive ring.

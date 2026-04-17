@@ -133,6 +133,7 @@ final class LocalOperatorLayer {
             return;
         }
 
+        boolean hasActiveUsers = hasActiveUsers(adapter);
         String selectedLabel = selectedSessionId == null
             ? "none"
             : adapter.label(selectedSessionId) + " (" + shortSessionId(selectedSessionId) + ")";
@@ -144,6 +145,7 @@ final class LocalOperatorLayer {
         String[] lines = new String[]{
             "Local Controls: D hud  N names  V vectors  L lines  P pause  S slow  R scatter  C center",
             "Shift+Wheel size  Ctrl+Wheel gain  Click select  Drag selected target",
+            hasActiveUsers ? null : "Open http://localhost:8080/ to create a participant",
             "Selected: " + selectedLabel,
             "Physics: " + (physicsPaused ? "paused" : (slowMotion ? "slow" : "live"))
                 + " | names: " + onOff(showNames)
@@ -154,6 +156,13 @@ final class LocalOperatorLayer {
                 + " speed=" + app.nf(selectedSpeed, 0, 4)
         };
 
+        int visibleLineCount = 0;
+        for (String lineText : lines) {
+            if (lineText != null) {
+                visibleLineCount++;
+            }
+        }
+
         app.textAlign(PApplet.LEFT, PApplet.TOP);
         app.textSize(12);
         float panelX = 14f;
@@ -161,17 +170,24 @@ final class LocalOperatorLayer {
         float lineHeight = 16f;
         float panelWidth = 0f;
         for (String lineText : lines) {
-            panelWidth = Math.max(panelWidth, app.textWidth(lineText));
+            if (lineText != null) {
+                panelWidth = Math.max(panelWidth, app.textWidth(lineText));
+            }
         }
-        float panelHeight = 12f + lines.length * lineHeight;
+        float panelHeight = 12f + visibleLineCount * lineHeight;
 
         app.noStroke();
         app.fill(0, 0, 0, panelAlpha);
         app.rect(panelX - 8f, panelY - 8f, panelWidth + 16f, panelHeight + 8f, 8f);
 
         app.fill(0, 0, 100, textAlpha);
-        for (int i = 0; i < lines.length; i++) {
-            app.text(lines[i], panelX, panelY + i * lineHeight);
+        int visibleIndex = 0;
+        for (String lineText : lines) {
+            if (lineText == null) {
+                continue;
+            }
+            app.text(lineText, panelX, panelY + visibleIndex * lineHeight);
+            visibleIndex++;
         }
     }
 
@@ -231,5 +247,9 @@ final class LocalOperatorLayer {
             return "n/a";
         }
         return selectedFrequency > 0f ? selectedFrequency + "Hz" : "held/none";
+    }
+
+    private boolean hasActiveUsers(Adapter adapter) {
+        return adapter.sessionIds().iterator().hasNext();
     }
 }
