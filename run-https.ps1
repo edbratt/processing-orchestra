@@ -1,8 +1,45 @@
+param(
+    [string]$Properties = ""
+)
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$jarPath = Get-ChildItem -Path (Join-Path $scriptDir "target") -Filter "processing-server-*.jar" -File |
-    Where-Object { $_.Name -notlike "*-sources.jar" -and $_.Name -notlike "*-javadoc.jar" -and $_.Name -notlike "*-original.jar" } |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
+
+function Get-LatestJar($rootDir) {
+    Get-ChildItem -Path (Join-Path $rootDir "target") -Filter "processing-server-*.jar" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike "*-sources.jar" -and $_.Name -notlike "*-javadoc.jar" -and $_.Name -notlike "*-original.jar" } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
+function Get-LatestSourceWriteTime($rootDir) {
+    $paths = @(
+        (Join-Path $rootDir "src"),
+        (Join-Path $rootDir "generated-src"),
+        (Join-Path $rootDir "config"),
+        (Join-Path $rootDir "pom.xml")
+    )
+
+    $latest = Get-Date "2000-01-01"
+    foreach ($path in $paths) {
+        if (-not (Test-Path $path)) {
+            continue
+        }
+        $items = Get-Item $path
+        if ($items.PSIsContainer) {
+            $candidate = Get-ChildItem -Path $path -Recurse -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+            if ($candidate -and $candidate.LastWriteTime -gt $latest) {
+                $latest = $candidate.LastWriteTime
+            }
+        } elseif ($items.LastWriteTime -gt $latest) {
+            $latest = $items.LastWriteTime
+        }
+    }
+    return $latest
+}
+
+$jarPath = Get-LatestJar $scriptDir
 $configPath = Join-Path $scriptDir "config\application-https.yaml"
 $keystorePath = Join-Path $scriptDir "keystore.p12"
 
@@ -13,9 +50,25 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {
+    Write-Host "ERROR: 'mvn' not found in PATH." -ForegroundColor Red
+    Write-Host "Install Maven and ensure it is available before using auto-build launch scripts." -ForegroundColor Yellow
+    exit 1
+}
+
+$sourceWriteTime = Get-LatestSourceWriteTime $scriptDir
+if (-not $jarPath -or $sourceWriteTime -gt $jarPath.LastWriteTime) {
+    Write-Host "Source changes detected. Building packaged jar..." -ForegroundColor Yellow
+    & mvn -q -DskipTests package
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Build failed." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+    $jarPath = Get-LatestJar $scriptDir
+}
+
 if (-not $jarPath) {
     Write-Host "ERROR: Packaged jar not found under $scriptDir\target" -ForegroundColor Red
-    Write-Host "Run 'mvn package -DskipTests' first." -ForegroundColor Yellow
     exit 1
 }
 
@@ -39,4 +92,11 @@ Write-Host "HTTPS config:  $configPath" -ForegroundColor Gray
 Write-Host "HTTPS keystore: $keystorePath" -ForegroundColor Gray
 Write-Host ""
 
-& java "-Dapp.config=$configPath" "-jar" $jarPath.FullName
+$javaArgs = @("-Dapp.config=$configPath")
+if (-not [string]::IsNullOrWhiteSpace($Properties)) {
+    $javaArgs += $Properties.Trim().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+}
+$javaArgs += "-jar"
+$javaArgs += $jarPath.FullName
+
+& java @javaArgs

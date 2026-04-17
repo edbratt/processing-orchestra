@@ -208,7 +208,20 @@
     <div class="container">
         <h1>Processing Server UI</h1>
         <div class="banner warning" id="connectionBanner"></div>
-        <div class="session-info">Session ID: <span id="sessionId">connecting...</span></div>
+        <div class="session-info">
+            Session ID: <span id="sessionId">connecting...</span>
+            <div style="margin-top: 10px;">
+                <input
+                    type="text"
+                    id="sessionNameInput"
+                    class="keyboard-input"
+                    style="max-width: 220px;"
+                    placeholder="Your name"
+                    autocomplete="name"
+                    maxlength="40">
+                <button id="btnSaveSessionName" style="margin-top: 8px; min-width: 120px;">Save Name</button>
+            </div>
+        </div>
         
         <div class="touch-area" id="touchArea">
             Touch or drag here
@@ -287,7 +300,7 @@
             </div>
 
             <div class="control-group">
-                <label>Keyboard Input</label>
+                <label>Mobile Keyboard Input</label>
                 <div style="font-size: 12px; color: #bbb; line-height: 1.5;">
                     <div>Status: <span id="keyboardStatus">Waiting for page focus</span></div>
                     <div>Last key: <span id="keyboardLastKey">-</span></div>
@@ -354,6 +367,9 @@
         let latestAccelerationSample = null;
         const pressedKeys = new Map();
         let mobileKeyboardOpen = false;
+        let reconnectTimerId = null;
+        let heartbeatTimerId = null;
+        let pageUnloading = false;
         
         // Check URL parameters for debug mode
         if (new URLSearchParams(window.location.search).has('debug')) {
@@ -450,6 +466,70 @@
 
         function updateKeyboardStatus(text) {
             document.getElementById('keyboardStatus').textContent = text;
+        }
+
+        function saveSessionNameLocally(name) {
+            try {
+                window.localStorage.setItem('processingServerName', name);
+            } catch (err) {
+                log('Unable to store session name locally', err);
+            }
+        }
+
+        function loadSavedSessionName() {
+            try {
+                return window.localStorage.getItem('processingServerName') || '';
+            } catch (err) {
+                return '';
+            }
+        }
+
+        function sendSessionMetaUpdate() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId) {
+                return;
+            }
+
+            const name = document.getElementById('sessionNameInput').value.trim();
+            saveSessionNameLocally(name);
+            ws.send(JSON.stringify({
+                type: 'session-meta',
+                name,
+                timestamp: Date.now()
+            }));
+        }
+
+        function startHeartbeat() {
+            stopHeartbeat();
+            heartbeatTimerId = window.setInterval(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId) {
+                    return;
+                }
+                ws.send(JSON.stringify({
+                    type: 'heartbeat',
+                    timestamp: Date.now()
+                }));
+            }, 10000);
+        }
+
+        function stopHeartbeat() {
+            if (heartbeatTimerId !== null) {
+                window.clearInterval(heartbeatTimerId);
+                heartbeatTimerId = null;
+            }
+        }
+
+        function notifySessionClosing() {
+            if (!sessionId) {
+                return;
+            }
+            try {
+                fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+                    method: 'DELETE',
+                    keepalive: true
+                });
+            } catch (err) {
+                log('Unable to send session close request', err);
+            }
         }
 
         function setKeyboardPanelOpen(isOpen) {
@@ -753,6 +833,7 @@
                 shutdownNoticeReceived = false;
                 document.getElementById('connectionStatus').textContent = 'connected';
                 hideBanner();
+                startHeartbeat();
             };
             
             ws.onmessage = (event) => {
@@ -768,13 +849,17 @@
             
             ws.onclose = () => {
                 document.getElementById('connectionStatus').textContent = 'disconnected';
+                stopHeartbeat();
                 stopAudio();
+                if (pageUnloading) {
+                    return;
+                }
                 if (shutdownNoticeReceived) {
                     showBanner('The server shut down cleanly. Refresh this page after the server starts again.', true);
                     return;
                 }
                 showBanner('Connection to the server was lost. Attempting to reconnect...', true);
-                setTimeout(connect, 2000);
+                reconnectTimerId = setTimeout(connect, 2000);
             };
              
             ws.onerror = () => {
@@ -788,6 +873,12 @@
                 case 'session':
                     sessionId = data.sessionId;
                     document.getElementById('sessionId').textContent = sessionId.substring(0, 8) + '...';
+                    if (typeof data.name === 'string' && data.name.length > 0) {
+                        document.getElementById('sessionNameInput').value = data.name;
+                    } else {
+                        document.getElementById('sessionNameInput').value = loadSavedSessionName();
+                    }
+                    sendSessionMetaUpdate();
                     if (data.sampleRate) {
                         audioConfig.sampleRate = data.sampleRate;
                         audioConfig.channels = data.channels || 2;
@@ -816,8 +907,16 @@
                     }
                     updateMotionUI();
                     break;
+                case 'session-meta-ack':
+                    if (typeof data.name === 'string') {
+                        document.getElementById('sessionNameInput').value = data.name;
+                        saveSessionNameLocally(data.name);
+                    }
+                    break;
                 case 'audio-config-ack':
                     log('Audio config acknowledged:', data);
+                    break;
+                case 'heartbeat-ack':
                     break;
                 case 'server-shutdown':
                     shutdownNoticeReceived = true;
@@ -1173,6 +1272,13 @@
         document.getElementById('btnStopAudio').addEventListener('click', stopAudio);
         document.getElementById('btnStartMotion').addEventListener('click', startMotion);
         document.getElementById('btnStopMotion').addEventListener('click', stopMotion);
+        document.getElementById('btnSaveSessionName').addEventListener('click', sendSessionMetaUpdate);
+        document.getElementById('sessionNameInput').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                sendSessionMetaUpdate();
+            }
+        });
         document.getElementById('btnOpenKeyboard').addEventListener('click', openMobileKeyboard);
         document.getElementById('btnHideKeyboard').addEventListener('click', closeMobileKeyboard);
         document.getElementById('mobileKeyboardInput').addEventListener('focus', () => {
@@ -1209,10 +1315,28 @@
         window.addEventListener('keyup', handleKeyUp);
         window.addEventListener('focus', () => updateKeyboardStatus('Ready'));
         window.addEventListener('blur', releaseAllKeys);
+        window.addEventListener('pagehide', () => {
+            pageUnloading = true;
+            if (reconnectTimerId !== null) {
+                clearTimeout(reconnectTimerId);
+                reconnectTimerId = null;
+            }
+            stopHeartbeat();
+            notifySessionClosing();
+            try {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'session-close', timestamp: Date.now() }));
+                    ws.close(1000, 'pagehide');
+                }
+            } catch (err) {
+                log('Unable to close websocket cleanly', err);
+            }
+        });
         
         // Initialize
         updateAudioUI();
         detectMotionSupport();
+        document.getElementById('sessionNameInput').value = loadSavedSessionName();
         document.getElementById('motionTrimValue').textContent = formatMotionTrimLabel(50);
         updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
         connect();

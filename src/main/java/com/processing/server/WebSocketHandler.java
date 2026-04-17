@@ -6,6 +6,7 @@ package com.processing.server;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.helidon.common.buffers.BufferData;
 import io.helidon.json.JsonObject;
@@ -24,6 +25,7 @@ public class WebSocketHandler implements WsListener {
     private final int bufferSize;
     private final DebugConfig debugConfig;
     private final MotionConfig motionConfig;
+    private final AtomicBoolean cleanedUp = new AtomicBoolean(false);
     private String sessionId;
     private int binaryMessageCount = 0;
     private int motionMessageCount = 0;
@@ -46,9 +48,11 @@ public class WebSocketHandler implements WsListener {
     public void onOpen(WsSession session) {
         OPEN_SESSIONS.add(session);
         this.sessionId = sessionManager.createSession();
+        SessionManager.SessionInfo sessionInfo = sessionManager.getSession(sessionId);
         JsonObject welcome = JsonValue.objectBuilder()
             .set("type", "session")
             .set("sessionId", sessionId)
+            .set("name", sessionInfo != null ? sessionInfo.name() : "")
             .set("sampleRate", audioBuffer.getSampleRate())
             .set("channels", audioBuffer.getChannels())
             .set("bufferSize", bufferSize)
@@ -60,13 +64,14 @@ public class WebSocketHandler implements WsListener {
             .set("motionMagnitudeClampG", motionConfig.getMagnitudeClampG())
             .build();
         session.send(welcome.toString(), true);
-        if (debugConfig.isLogging()) {
-            System.out.println("WebSocket opened for session: " + sessionId.substring(0, 8));
-        }
+        logDebug("WebSocket opened for session: " + sessionId.substring(0, 8));
     }
 
     @Override
     public void onMessage(WsSession session, String message, boolean last) {
+        if (sessionId != null) {
+            sessionManager.touchSession(sessionId);
+        }
         try {
             JsonObject json = JsonParser.create(message).readJsonObject();
             String messageType = json.stringValue("type", "");
@@ -76,16 +81,26 @@ public class WebSocketHandler implements WsListener {
                 case "touch", "slider", "button" -> handleControlEvent(json);
                 case "key" -> handleKeyEvent(json);
                 case "motion" -> handleMotionEvent(json);
+                case "session-meta" -> handleSessionMeta(json, session);
+                case "heartbeat" -> handleHeartbeat(session);
+                case "session-close" -> {
+                    logDebug("Received explicit session-close from browser for session: " + shortSessionId());
+                    cleanupSession("Browser requested close for session: ");
+                }
                 default -> session.send("{\"error\":\"unknown message type\"}", true);
             }
         } catch (Exception e) {
-            session.send("{\"error\":\"invalid message\"}", true);
+            try {
+                session.send("{\"error\":\"invalid message\"}", true);
+            } catch (Exception ignored) {
+            }
         }
     }
 
     @Override
     public void onMessage(WsSession session, BufferData buffer, boolean last) {
         if (sessionId == null) return;
+        sessionManager.touchSession(sessionId);
         
         try {
             byte[] audioData = buffer.readBytes();
@@ -109,6 +124,22 @@ public class WebSocketHandler implements WsListener {
             .set("channels", audioBuffer.getChannels())
             .build();
         session.send(result.toString(), true);
+    }
+
+    private void handleHeartbeat(WsSession session) {
+        if (sessionId == null) {
+            return;
+        }
+        sessionManager.touchSession(sessionId);
+        logDebug("Heartbeat received for session: " + shortSessionId());
+        try {
+            JsonObject ack = JsonValue.objectBuilder()
+                .set("type", "heartbeat-ack")
+                .set("timestamp", System.currentTimeMillis())
+                .build();
+            session.send(ack.toString(), true);
+        } catch (Exception ignored) {
+        }
     }
 
     private void handleControlEvent(JsonObject json) {
@@ -165,6 +196,7 @@ public class WebSocketHandler implements WsListener {
             0f,
             0f,
             "",
+            "",
             0,
             "",
             alpha,
@@ -191,6 +223,24 @@ public class WebSocketHandler implements WsListener {
         }
     }
 
+    private void handleSessionMeta(JsonObject json, WsSession session) {
+        String name = json.stringValue("name", "").trim();
+        sessionManager.updateSessionName(sessionId, name);
+        eventQueue.push(new UserInputEvent(
+            sessionId,
+            "session-meta",
+            "name",
+            name,
+            System.currentTimeMillis()
+        ));
+
+        JsonObject ack = JsonValue.objectBuilder()
+            .set("type", "session-meta-ack")
+            .set("name", name)
+            .build();
+        session.send(ack.toString(), true);
+    }
+
     private float getFloat(JsonObject json, String key, double defaultValue) {
         try {
             return (float) json.doubleValue(key, defaultValue);
@@ -214,22 +264,38 @@ public class WebSocketHandler implements WsListener {
     @Override
     public void onClose(WsSession session, int status, String reason) {
         OPEN_SESSIONS.remove(session);
-        if (sessionId != null) {
-            sessionManager.removeSession(sessionId);
-            audioBuffer.clearSession(sessionId);
-            if (debugConfig.isLogging()) {
-                System.out.println("WebSocket closed for session: " + sessionId.substring(0, 8));
-            }
-        }
+        logDebug("WebSocket onClose for session " + shortSessionId()
+            + " status=" + status
+            + " reason=" + (reason == null || reason.isBlank() ? "<empty>" : reason));
+        cleanupSession("WebSocket closed for session: ");
     }
 
     @Override
     public void onError(WsSession session, Throwable t) {
         OPEN_SESSIONS.remove(session);
-        if (sessionId != null) {
-            sessionManager.removeSession(sessionId);
-            audioBuffer.clearSession(sessionId);
-            System.err.println("WebSocket error for session " + sessionId.substring(0, 8) + ": " + t.getMessage());
+        String message = t != null ? t.getMessage() : "unknown error";
+        logDebug("WebSocket onError for session " + shortSessionId() + ": " + message);
+        cleanupSession("WebSocket error for session: ", message);
+    }
+
+    private void cleanupSession(String prefix) {
+        cleanupSession(prefix, "");
+    }
+
+    private void cleanupSession(String prefix, String suffix) {
+        if (sessionId != null && cleanedUp.compareAndSet(false, true)) {
+            String closingSessionId = sessionId;
+            eventQueue.push(new UserInputEvent(closingSessionId, "session-ended", "", "", System.currentTimeMillis()));
+            sessionManager.removeSession(closingSessionId);
+            audioBuffer.clearSession(closingSessionId);
+            if (debugConfig.isLogging()) {
+                System.out.println(prefix + closingSessionId.substring(0, 8) + suffix);
+                System.out.println("Session cleanup completed for " + closingSessionId.substring(0, 8)
+                    + " (event queued, session removed, audio cleared)");
+            } else if (!suffix.isBlank()) {
+                System.err.println(prefix + closingSessionId.substring(0, 8) + suffix);
+            }
+            sessionId = null;
         }
     }
 
@@ -248,5 +314,15 @@ public class WebSocketHandler implements WsListener {
             }
         }
         OPEN_SESSIONS.clear();
+    }
+
+    private void logDebug(String message) {
+        if (debugConfig.isLogging()) {
+            System.out.println(message);
+        }
+    }
+
+    private String shortSessionId() {
+        return sessionId == null ? "<none>" : sessionId.substring(0, 8);
     }
 }

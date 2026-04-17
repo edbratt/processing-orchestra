@@ -15,7 +15,10 @@ processing:
   fps: 60
 
 audio:
-  mode: "high-quality-stereo"
+  mode: "high-quality-mono"
+  debug:
+    logging: false
+    sample-limit: 5
   modes:
     high-quality-stereo:
       sample-rate: 44100

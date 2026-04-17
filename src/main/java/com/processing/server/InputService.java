@@ -5,8 +5,10 @@
 package com.processing.server;
 
 import io.helidon.http.Status;
+import io.helidon.json.JsonArray;
 import io.helidon.json.JsonObject;
 import io.helidon.json.JsonValue;
+import java.util.ArrayList;
 import io.helidon.webserver.http.HttpRules;
 import io.helidon.webserver.http.HttpService;
 import io.helidon.webserver.http.ServerRequest;
@@ -66,6 +68,10 @@ public class InputService implements HttpService {
         String sessionId = req.path().pathParameters().get("id");
         if (sessionId != null && sessionManager.isActive(sessionId)) {
             sessionManager.removeSession(sessionId);
+            if (audioBuffer != null) {
+                audioBuffer.clearSession(sessionId);
+            }
+            eventQueue.push(new UserInputEvent(sessionId, "session-ended", "", "", System.currentTimeMillis()));
             res.status(Status.NO_CONTENT_204).send();
         } else {
             res.status(Status.NOT_FOUND_404).send();
@@ -76,6 +82,17 @@ public class InputService implements HttpService {
         var builder = JsonValue.objectBuilder()
             .set("activeSessions", sessionManager.getActiveSessionCount())
             .set("queueSize", eventQueue.size());
+
+        var sessions = new ArrayList<JsonValue>();
+        for (SessionManager.SessionInfo session : sessionManager.snapshotSessions().values()) {
+            sessions.add(JsonValue.objectBuilder()
+                .set("sessionId", session.sessionId())
+                .set("createdAt", session.createdAt())
+                .set("name", session.name())
+                .set("lastSeenAt", session.lastSeenAt())
+                .build());
+        }
+        builder.set("sessions", JsonArray.create(sessions));
         
         if (audioBuffer != null) {
             builder.set("audioStreams", audioBuffer.getActiveSessionCount())

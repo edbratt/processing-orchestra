@@ -6,6 +6,9 @@ package com.processing.server;
 
 import java.lang.reflect.Constructor;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import io.helidon.config.Config;
 import io.helidon.config.ConfigSources;
@@ -20,6 +23,8 @@ public final class Main {
     private static final String DEFAULT_CONFIG_RESOURCE = "application.yaml";
     private static final String TLS_SOCKET_NAME = "tls";
     private static final String DEFAULT_SKETCH_CLASS = "com.processing.server.ProcessingSketch";
+    private static final long SESSION_STALE_AFTER_MILLIS = 30000;
+    private static final long SESSION_REAPER_INTERVAL_MILLIS = 10000;
 
     private Main() {
     }
@@ -42,7 +47,9 @@ public final class Main {
         );
 
         DebugConfig debugConfig = new DebugConfig(
-            config.get("debug.logging").asBoolean().orElse(false)
+            config.get("debug.logging").asBoolean().orElse(false),
+            config.get("audio.debug.logging").asBoolean().orElse(false),
+            config.get("audio.debug.sample-limit").asInt().orElse(5)
         );
 
         int width = config.get("processing.width").asInt().orElse(800);
@@ -50,6 +57,7 @@ public final class Main {
 
         String sketchClassName = config.get("processing.sketch-class").asString().orElse(DEFAULT_SKETCH_CLASS);
         startSketch(sketchClassName, eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
+        ScheduledExecutorService sessionReaper = startSessionReaper(sessionManager, eventQueue, audioBuffer, debugConfig);
 
         InputService inputService = new InputService(sessionManager, eventQueue, audioBuffer);
         // Attach WebSocket handling to every listener we expose so the browser UI and sketch
@@ -70,7 +78,10 @@ public final class Main {
 
         WebServer server = serverBuilder.build().start();
         Runtime.getRuntime().addShutdownHook(new Thread(
-            () -> WebSocketHandler.broadcastShutdown("Processing Server is shutting down."),
+            () -> {
+                WebSocketHandler.broadcastShutdown("Processing Server is shutting down.");
+                sessionReaper.shutdownNow();
+            },
             "processing-server-shutdown"));
 
         logSocket(server, WebServer.DEFAULT_SOCKET_NAME, "Local HTTP", "localhost");
@@ -90,6 +101,7 @@ public final class Main {
                 + motionConfig.getMagnitudeClampG() + "g");
         System.out.println("Sketch class: " + sketchClassName);
         System.out.println("Debug logging: " + (debugConfig.isLogging() ? "enabled" : "disabled"));
+        System.out.println("Audio debug logging: " + (debugConfig.isAudioLogging() ? "enabled" : "disabled"));
     }
 
     private static Config loadConfig() {
@@ -160,6 +172,41 @@ public final class Main {
             sketchClass.getMethod("runSketch").invoke(sketch);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Failed to start sketch class " + sketchClassName, e);
+        }
+    }
+
+    private static ScheduledExecutorService startSessionReaper(SessionManager sessionManager,
+                                                               EventQueue eventQueue,
+                                                               AudioBuffer audioBuffer,
+                                                               DebugConfig debugConfig) {
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "session-reaper");
+            thread.setDaemon(true);
+            return thread;
+        });
+        executor.scheduleAtFixedRate(() -> reapExpiredSessions(sessionManager, eventQueue, audioBuffer, debugConfig),
+            SESSION_REAPER_INTERVAL_MILLIS,
+            SESSION_REAPER_INTERVAL_MILLIS,
+            TimeUnit.MILLISECONDS);
+        return executor;
+    }
+
+    private static void reapExpiredSessions(SessionManager sessionManager,
+                                            EventQueue eventQueue,
+                                            AudioBuffer audioBuffer,
+                                            DebugConfig debugConfig) {
+        long now = System.currentTimeMillis();
+        for (SessionManager.SessionInfo session : sessionManager.findExpiredSessions(SESSION_STALE_AFTER_MILLIS, now).values()) {
+            sessionManager.removeSession(session.sessionId());
+            audioBuffer.clearSession(session.sessionId());
+            eventQueue.push(new UserInputEvent(session.sessionId(), "session-ended", "", "", now));
+            if (debugConfig.isLogging()) {
+                System.out.println("Reaped stale session: " + session.sessionId().substring(0, 8)
+                    + " lastSeenAt=" + session.lastSeenAt()
+                    + " ageMs=" + (now - session.lastSeenAt()));
+                System.out.println("Stale session cleanup completed for " + session.sessionId().substring(0, 8)
+                    + " (event queued, session removed, audio cleared)");
+            }
         }
     }
 

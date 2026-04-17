@@ -26,10 +26,14 @@ A multi-user web-based controller for Processing.org visual sketches. Multiple u
 
 - **Multi-user support**: Multiple concurrent browser clients
 - **Real-time WebSocket communication**: Low-latency bidirectional messaging
+- **Stronger session lifecycle handling**: Session names, heartbeat updates, explicit browser close, and stale-session reaping
 - **Touch/mouse input**: Position tracking with visual feedback
 - **Keyboard input**: Desktop browser key events over the same WebSocket channel
-- **Audio streaming**: Per-user audio level visualization
+- **Audio streaming**: Per-user audio buffering, visual level response, and optional dominant-frequency mapping in sample sketches
 - **Phone motion input**: Tilt and shake from supported mobile browsers over HTTPS
+- **Selectable sketch classes**: Launch alternate sketches with `processing.sketch-class`
+- **Local operator controls**: Processing-window selection, drag, wheel adjustment, HUD, and pause/slow controls layered on top of browser input
+- **Gravity-orbit sketch samples**: Physics-based sketch variants, including a gradient-background version
 - **HTTPS/TLS**: Secure connections required for mobile microphone access
 - **Cross-device**: Works on desktop and mobile browsers
 
@@ -190,9 +194,24 @@ mvn clean package -DskipTests
 .\run.ps1
 ```
 
+With extra Java properties:
+```powershell
+.\run.ps1 -Properties "-Dprocessing.sketch-class=com.processing.server.GravityOrbitSketch"
+```
+
+Notes:
+- the run scripts accept a plain `properties` argument and insert it before `-jar`
+- the run scripts now auto-build with `mvn -q -DskipTests package` when sources are newer than the packaged jar
+- because of that auto-build step, `mvn` must be available on `PATH`
+
 *Mac/Linux (Bash):*
 ```bash
 ./run.sh
+```
+
+With extra Java properties:
+```bash
+./run.sh "-Dprocessing.sketch-class=com.processing.server.GravityOrbitSketch"
 ```
 
 **Option A2: Using shell script with HTTPS**
@@ -202,9 +221,19 @@ mvn clean package -DskipTests
 .\run-https.ps1
 ```
 
+With extra Java properties:
+```powershell
+.\run-https.ps1 -Properties "-Dprocessing.sketch-class=com.processing.server.GravityOrbitGradientSketch"
+```
+
 *Mac/Linux (Bash):*
 ```bash
 ./run-https.sh
+```
+
+With extra Java properties:
+```bash
+./run-https.sh "-Dprocessing.sketch-class=com.processing.server.GravityOrbitGradientSketch"
 ```
 
 **Option B: Using Maven**
@@ -267,6 +296,7 @@ processing-server/
 |-- ARCHITECTURE.md                   # Detailed architecture documentation
 |-- CUSTOMIZATION.md                  # Guide for modifying and extending
 |-- TODO.md                           # Follow-up tasks and ideas
+|-- GRAVITY_ORBIT_SKETCH_TUTORIAL.md  # Walkthrough of the gravity-orbit sample sketches
 |-- run.ps1                           # PowerShell run script
 |-- run.sh                            # Bash run script
 |-- run-https.ps1                     # PowerShell HTTPS launch script
@@ -285,6 +315,10 @@ processing-server/
 |       |-- java/com/processing/server/
 |       |   |-- Main.java             # Entry point and socket configuration
 |       |   |-- ProcessingSketch.java # Processing canvas behavior
+|       |   |-- GravityOrbitSketch.java # Alternate orbiting multi-user sketch
+|       |   |-- GravityOrbitGradientSketch.java # Orbit sketch with attraction-based background field
+|       |   |-- LocalOperatorLayer.java # Shared Processing-window operator controls for selectable sketches
+|       |   |-- StarterSketch.java    # Minimal alternate sketch example
 |       |   |-- WebSocketHandler.java # WebSocket session and message handling
 |       |   |-- InputService.java     # REST API endpoints
 |       |   |-- SessionManager.java   # User session tracking
@@ -329,7 +363,10 @@ processing:
   fps: 60                           # Target frame rate
 
 audio:
-  mode: "high-quality-stereo"       # Audio mode
+  mode: "high-quality-mono"         # Audio mode
+  debug:
+    logging: false                  # Enable audio-analysis debug output
+    sample-limit: 5                 # Max audio debug samples to print
   modes:
     high-quality-stereo:
       sample-rate: 44100
@@ -362,7 +399,41 @@ Example:
 java "-Dprocessing.sketch-class=com.processing.server.StarterSketch" -jar .\target\processing-server-1.0-SNAPSHOT.jar
 ```
 
+Using the helper script:
+
+```powershell
+.\run.ps1 -Properties "-Dprocessing.sketch-class=com.processing.server.GravityOrbitSketch"
+```
+
+Gradient variant:
+
+```powershell
+.\run.ps1 -Properties "-Dprocessing.sketch-class=com.processing.server.GravityOrbitGradientSketch"
+```
+
 `StarterSketch` is included as a minimal alternate sketch. It proves that the config switch works and reacts to browser touch, size-slider, and keyboard input.
+
+Additional sample sketches included in `src/main/java/com/processing/server/`:
+
+- `GravityOrbitSketch`: orbiting multi-user circles with touch anchors, shake repulsion, and motion-modified attraction
+- `GravityOrbitGradientSketch`: the same sketch plus a soft attraction-based background gradient
+
+The default `ProcessingSketch` and the gravity sketches also share a local Processing-window operator layer. That local layer is separate from browser controls and currently supports:
+
+- click to select a circle
+- drag to move the selected user target
+- `Shift + mouse wheel` to adjust selected user size
+- `Ctrl + mouse wheel` to adjust selected user gain
+- `D` toggle the local HUD
+- `N` toggle on-canvas names
+- `P` pause local sketch physics/easing updates
+- `S` slow motion
+- `R` scatter all circles
+- `C` re-center all circles
+
+In the gravity sketches, the same layer also drives optional local overlays for velocity vectors and attraction lines.
+
+See [GRAVITY_ORBIT_SKETCH_TUTORIAL.md](GRAVITY_ORBIT_SKETCH_TUTORIAL.md) for a walkthrough of how those sketches were built by starting from `ProcessingSketch` and modifying key methods.
 
 For reviewed converted sketches, keep the generated Java separate from the main server source tree:
 
@@ -428,6 +499,25 @@ audio:
   mode: "voice"  # Options: high-quality-stereo, high-quality-mono, voice
 ```
 
+### Audio Debug Logging
+
+Audio-analysis debug logging is configured separately from general debug logging:
+
+```yaml
+audio:
+  debug:
+    logging: true
+    sample-limit: 12
+```
+
+Or via system property:
+
+```powershell
+.\run.ps1 -Properties "-Daudio.debug.logging=true -Daudio.debug.sample-limit=12 -Dprocessing.sketch-class=com.processing.server.GravityOrbitGradientSketch"
+```
+
+With `audio.debug.logging` enabled, the gravity sketches emit audio debug lines only when the analyzed level is above the current detection threshold, so quiet buffers that merely retain the last frequency do not spam the log.
+
 ## Browser UI
 
 Contents:
@@ -444,6 +534,10 @@ The web interface (`index.html`) provides:
 7. **Motion Input**: Enable phone motion sensors, view live tilt values, and send tilt/shake control over HTTPS
 8. **Motion Trim Slider**: Adjust motion sensitivity in the browser before motion samples are sent to the server
 9. **Keyboard Input**: Desktop browsers can send key events while the page has focus, and phones/tablets can open a compact on-screen keyboard with `Tap for simple keyboard input`
+10. **Session Name**: A browser client can save a short display name for its session, and the sketch will use that name as the on-canvas label when available
+11. **Session Lifecycle**: The browser sends heartbeats while connected and sends a best-effort close notification when the page is leaving, which helps remove stale circles more reliably
+
+Separately from the browser UI, the Processing window now also has a local operator layer for the person sitting at the machine. Those controls do not travel over the WebSocket and do not replace browser-side session input.
 
 The touch area uses `touch-action: none`, which helps avoid accidental browser text selection or gesture interference while dragging.
 
@@ -456,6 +550,17 @@ Keyboard notes:
 - the browser UI also exposes the last key seen so you can confirm the protocol is active
 - if a custom sketch also keeps local Processing `keyPressed()` logic, that local keyboard path only works when the Processing window has focus
 - mobile soft keyboards are best for simple character input; important mobile controls should still prefer buttons, sliders, and touch
+
+Processing-window local operator notes:
+- these controls are separate from browser key events in `EventQueue`
+- local controls only work when the Processing window has focus
+- click selects the nearest visible circle
+- drag moves that selected user's local target position
+- `Shift + mouse wheel` changes selected size
+- `Ctrl + mouse wheel` changes selected gain
+- `D`, `N`, `P`, `S`, `R`, and `C` are reserved for local operator actions
+- the gravity sketches also support `V` for velocity vectors and `L` for attraction lines
+- the local HUD shows selected-user details; `freq=n/a` in the default sketch and live dominant frequency in the gravity sketches
 
 ### Enabling Debug Mode
 
@@ -478,7 +583,7 @@ Contents:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/session` | Create new session (returns JSON with sessionId) |
-| `GET` | `/api/status` | Get status (session count, queue size) |
+| `GET` | `/api/status` | Get status (session count, queue size, and session metadata such as saved names and `lastSeenAt`) |
 | `POST` | `/api/event` | Submit event (requires sessionId in body) |
 
 ### WebSocket Endpoint
@@ -490,7 +595,15 @@ Connect to `ws://localhost:8080/ws` for local HTTP, or `wss://localhost:8443/ws`
 ```json
 {
   "type": "session",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Ava"
+}
+```
+
+```json
+{
+  "type": "session-meta-ack",
+  "name": "Ava"
 }
 ```
 
@@ -544,6 +657,27 @@ Connect to `ws://localhost:8080/ws` for local HTTP, or `wss://localhost:8443/ws`
   "key": "ArrowLeft",
   "keyCode": 37,
   "action": "pressed",
+  "timestamp": 1234567890
+}
+```
+
+```json
+{
+  "type": "session-meta",
+  "name": "Ava"
+}
+```
+
+```json
+{
+  "type": "heartbeat",
+  "timestamp": 1234567890
+}
+```
+
+```json
+{
+  "type": "session-close",
   "timestamp": 1234567890
 }
 ```
@@ -628,6 +762,7 @@ If curl fails with SSL error, the keystore is malformed. Regenerate with `create
 - On a clean shutdown, the server sends a final `server-shutdown` WebSocket message before closing connections
 - The browser shows a banner and scrolls back to the top so the notice is visible
 - On an unexpected disconnect, the browser also shows a banner and attempts to reconnect
+- If a browser disappears abruptly, the server now reaps stale sessions after a timeout, so sketch-side user state should eventually be removed even when a clean close is missed
 
 ### "Microphone not working on mobile"
 
@@ -776,6 +911,14 @@ java -Ddebug.logging=true -jar .\target\processing-server-1.0-SNAPSHOT.jar
 ```bash
 java -Ddebug.logging=true -jar ./target/processing-server-1.0-SNAPSHOT.jar
 ```
+
+With debug logging enabled, the app now logs more session-lifecycle detail, including:
+- WebSocket open/close/error
+- browser-requested `session-close`
+- heartbeat receipt
+- stale-session reaping and cleanup completion
+
+General debug logging does not control the gravity sketches' audio-analysis traces. Use `audio.debug.logging` for those.
 
 ## Architecture
 

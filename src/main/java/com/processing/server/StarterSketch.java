@@ -35,7 +35,7 @@ public class StarterSketch extends PApplet {
 
     @Override
     public void setup() {
-        surface.setResizable(false);
+        surface.setResizable(true);
         surface.setTitle("Processing Server - Starter Sketch");
         strokeWeight(6);
     }

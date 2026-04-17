@@ -22,6 +22,8 @@ If you want the shortest possible description, it is this:
 - helper classes store it
 - `ProcessingSketch.java` turns it into visuals
 
+There is now also a small local operator layer inside the Processing-side runtime. That layer handles mouse and keyboard input in the Processing window itself without going through the browser or the WebSocket path.
+
 ## Where the Program Starts
 
 The application starts in:
@@ -45,6 +47,9 @@ The important objects created there are:
 - `ProcessingSketch`
 - `WebSocketHandler`
 - `InputService`
+- `LocalOperatorLayer`
+
+At runtime, `Main.java` can also start a different sketch class if `processing.sketch-class` is set. That means the runtime wiring stays the same even when the visual sketch implementation changes.
 
 These are not just random classes. They are the core runtime building blocks of the app.
 
@@ -71,7 +76,9 @@ What it does:
 
 - keeps track of connected browser sessions
 - gives each client a stable identity
-- removes session data when a client disconnects
+- stores session metadata such as a browser-provided display name
+- tracks when the session was last seen
+- removes session data when a client disconnects or becomes stale
 
 Why it matters:
 
@@ -85,6 +92,8 @@ How it stores that:
 - the value is a small `SessionInfo` record containing:
   - the same `sessionId`
   - the time the session was created
+  - the saved display name
+  - the last time the server heard from that session
 
 Good beginner question:
 
@@ -150,6 +159,8 @@ What it does:
 - receives the real-time WebSocket connection from the browser
 - handles JSON control messages
 - handles binary audio frames
+- handles browser heartbeats
+- handles explicit browser close requests
 - pushes control data into `EventQueue`
 - pushes audio data into `AudioBuffer`
 
@@ -197,6 +208,28 @@ Why it matters:
 
 This is the visual heart of the application. If you want to know how the circles move, how audio affects the drawing, or how motion becomes a burst effect, this is the main file to study.
 
+### `LocalOperatorLayer.java`
+
+File:
+
+- [LocalOperatorLayer.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/LocalOperatorLayer.java)
+
+What it does:
+
+- handles Processing-window mouse and keyboard input that should stay local to the machine running the sketch
+- manages local selection state
+- supports dragging a selected user, wheel-based parameter changes, and a local HUD
+- keeps pause and slow-motion state for sketches that use it
+
+Why it matters:
+
+This layer separates two different ideas cleanly:
+
+- browser client interaction that belongs to remote users
+- local operator interaction that belongs to the person running the sketch window
+
+That separation reduces confusion because local Processing-window shortcuts do not have to be mixed into the browser event protocol.
+
 ### `index.html`
 
 File:
@@ -209,10 +242,29 @@ What it does:
 - opens the WebSocket connection
 - watches touch, sliders, buttons, motion sensors, and microphone input
 - sends those inputs to the server
+- sends session metadata updates such as the saved display name
+- sends periodic heartbeat messages while connected
+- sends a best-effort session close notification on page teardown
 
 Why it matters:
 
 The browser page is not the main visualization. It is the remote control panel and sensor/input source.
+
+## How Launch Scripts Affect Runtime
+
+The common launch scripts are:
+
+- `run.ps1`
+- `run.sh`
+- `run-https.ps1`
+- `run-https.sh`
+
+At runtime, those scripts now do two useful things before Java starts:
+
+1. they can pass extra Java system properties such as `-Dprocessing.sketch-class=...`
+2. they can auto-build the packaged jar when source files are newer than the current jar
+
+That means the runtime entry point is still `Main.java`, but many users now reach it through a script that may first rebuild the jar and then pass launch-time properties into the Java process.
 
 ## How Initialization Works
 
@@ -244,6 +296,16 @@ When a user opens the page:
 4. The server associates that connection with a session.
 
 That session tracking is important because multiple people may be connected at once. The app needs to know which input belongs to which person.
+
+While the page stays open, the browser now also sends:
+
+- `session-meta` messages when the user saves a display name
+- `heartbeat` messages on a timer so the server can keep `lastSeenAt` fresh
+
+When the page is leaving, the browser tries two cleanup paths:
+
+- an explicit `session-close` WebSocket message
+- a best-effort `DELETE /api/session/{id}` request
 
 ## How One Browser Client Is Represented At Runtime
 
@@ -295,6 +357,7 @@ That welcome message includes:
 
 - `type: "session"`
 - `sessionId`
+- saved session name
 - audio settings
 - motion settings
 
@@ -411,24 +474,63 @@ That method creates the sketch-side default values for the new user, including:
 
 So the visual user is created lazily, not at the instant the network session opens.
 
+## What The Sketch Does Each Frame After A User Exists
+
+Once the sketch has created state for a session, that user's state is revisited on every Processing frame inside `draw()`.
+
+For the default `ProcessingSketch`, the frame loop is roughly:
+
+1. clear the background
+2. drain `EventQueue`
+3. apply those events to per-session maps
+4. poll `AudioBuffer`
+5. update per-user audio levels and shared audio smoothing
+6. update temporary animation values such as hue velocity and pulse decay
+7. draw each user's circles and label
+8. draw the shared audio meter
+
+So if you want to know "what happens repeatedly after a user exists?", the answer is:
+
+- their stored maps are read every frame
+- their motion/audio/effect values are updated every frame
+- their current visual representation is redrawn every frame
+
+That is a helpful mental model:
+
+- session creation is lazy
+- once created, user state is part of the draw loop on every frame
+- different sketch classes share the same overall runtime wiring but can change what happens inside that frame loop
+
+Sketch-specific variations belong in the sketch-specific documents. For the gravity-orbit examples, see:
+
+- [GRAVITY_ORBIT_SKETCH_TUTORIAL.md](/C:/users/ed/dev/processing-server/GRAVITY_ORBIT_SKETCH_TUTORIAL.md:1)
+
 ## What Happens When A Client Disconnects
 
-When the socket closes or errors:
+When the socket closes, errors, or the browser explicitly announces shutdown:
 
 1. the `WsSession` is removed from `OPEN_SESSIONS`
 2. `SessionManager.removeSession(sessionId)` removes the session record
 3. `AudioBuffer.clearSession(sessionId)` removes queued audio for that session
+4. `WebSocketHandler` pushes a `session-ended` event into `EventQueue`
+5. `ProcessingSketch` handles that event and removes the session's sketch-side state and visualization
 
-One important detail for future cleanup work:
-
-`ProcessingSketch` does not currently remove that session's entries from all of its user-state maps at disconnect time.
-
-So the cleanup is currently strongest in:
+That means disconnect cleanup now happens across all three layers:
 
 - `SessionManager`
 - `AudioBuffer`
+- `ProcessingSketch`
 
-but not yet fully mirrored inside the sketch state maps.
+There is now also a fallback path for missed disconnects:
+
+1. the browser keeps sending heartbeat messages while the page is alive
+2. `SessionManager` updates `lastSeenAt` whenever traffic arrives
+3. a background reaper in `Main.java` checks for sessions that have been silent for too long
+4. stale sessions are removed from `SessionManager`
+5. audio is cleared
+6. a `session-ended` event is queued so the sketch removes the orphaned circle
+
+This matters because browser/network disconnects are not always clean. The runtime no longer depends only on the WebSocket close callback being observed immediately.
 
 ## The Different Runtime Channels
 
@@ -495,6 +597,9 @@ Examples of JSON control events:
 - slider changes
 - button presses
 - motion data from a phone
+- heartbeats
+- session metadata updates
+- explicit session close messages
 
 The path looks like this:
 
@@ -562,6 +667,8 @@ In the current sketch, this is used for things like:
 
 `ProcessingSketch.java` is where the stored data becomes visible output.
 
+It is also useful to remember that this file is the default visual consumer, not the only possible one. If `processing.sketch-class` points at one of the alternate sketch classes, the same runtime data sources are consumed by that alternate sketch instead.
+
 During each frame, the sketch roughly does this:
 
 1. read waiting control events from `EventQueue`
@@ -578,6 +685,32 @@ The sketch does not own the network connections directly. Instead, it depends on
 - `EventQueue` for control events
 - `AudioBuffer` for audio
 - session-linked user state that is updated using session IDs
+
+Some sketches now also consult `LocalOperatorLayer` during their draw cycle for:
+
+- pause or slow-motion state
+- whether names and overlays should be drawn
+- which user is locally selected
+
+## Audio Debug Logging
+
+There is now a separate audio-debug configuration path in addition to the general debug flag.
+
+The two ideas are:
+
+- `debug.logging`
+  enables broader application and session-lifecycle debug output
+- `audio.debug.logging`
+  enables audio-analysis traces used by sketches that inspect buffered PCM audio in more detail
+
+This matters because you may want to inspect audio analysis without turning on all other debug messages.
+
+The related settings live in `application.yaml` under:
+
+- `audio.debug.logging`
+- `audio.debug.sample-limit`
+
+In the current gravity-based sample sketches, the audio-debug trace only prints when the analyzed buffer level is above the configured detection threshold. Quiet buffers that just preserve the last detected frequency do not produce a log line.
 
 ## How the Classes Are Hooked Together
 
@@ -603,6 +736,19 @@ This is the "wiring" step.
 - JSON control messages are turned into `UserInputEvent` objects and stored in `EventQueue`
 - binary audio is stored in `AudioBuffer`
 - session IDs are used so each browser client stays separate
+
+### `LocalOperatorLayer.java` stays on the Processing side
+
+`LocalOperatorLayer.java` does not participate in networking.
+
+Its job is to sit entirely on the sketch side and interpret:
+
+- mouse clicks in the Processing window
+- mouse dragging in the Processing window
+- wheel gestures with modifier keys
+- a small set of local operator keyboard shortcuts
+
+This is useful to notice because these local controls do not create `UserInputEvent` records and are not sent through `EventQueue`.
 
 ### `InputService.java` exposes read-only or tool-style server information
 
@@ -635,7 +781,7 @@ If you are new to the codebase, read it in this order:
 5. [AudioBuffer.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/AudioBuffer.java)
    This shows how audio waits for the sketch.
 6. [ProcessingSketch.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/ProcessingSketch.java)
-   This shows how the visual result is produced.
+   This shows how the default visual result is produced.
 7. [index.html](/C:/Users/ed/dev/processing-server/src/main/resources/static/index.html)
    This shows what the browser is sending in the first place.
 
@@ -674,5 +820,11 @@ At runtime, the application works like this:
 - `AudioBuffer.java` stores audio data
 - `SessionManager.java` keeps users separate
 - `ProcessingSketch.java` reads that shared data and draws the final result
+
+And now, in the newer runtime:
+
+- the browser sends heartbeats and best-effort close notifications
+- `SessionManager` tracks `lastSeenAt`
+- `Main.java` reaps stale sessions
 
 That is the core runtime story of the project.

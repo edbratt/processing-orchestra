@@ -5,6 +5,7 @@
 package com.processing.server;
 
 import processing.core.PApplet;
+import processing.event.MouseEvent;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -12,6 +13,7 @@ public class ProcessingSketch extends PApplet {
     private static final float DEFAULT_SIZE = 0.5f;
     private static final float DEFAULT_SPEED = 0.5f;
     private static final float DEFAULT_GAIN = 0.5f;
+    private static final String DEFAULT_USER_LABEL = "Guest";
 
     private final EventQueue eventQueue;
     private final AudioBuffer audioBuffer;
@@ -34,6 +36,104 @@ public class ProcessingSketch extends PApplet {
     private final Map<String, float[]> userMotion = new HashMap<>();
     private final Map<String, Float> userLastMotionMagnitudes = new HashMap<>();
     private final Map<String, Map<Integer, Boolean>> userKeyStates = new HashMap<>();
+    private final Map<String, String> userNames = new HashMap<>();
+    private final LocalOperatorLayer localOperatorLayer = new LocalOperatorLayer();
+    private final LocalOperatorLayer.Adapter localOperatorAdapter = new LocalOperatorLayer.Adapter() {
+        @Override
+        public Iterable<String> sessionIds() {
+            return userPositions.keySet();
+        }
+
+        @Override
+        public float[] position(String sessionId) {
+            return userPositions.get(sessionId);
+        }
+
+        @Override
+        public float selectionRadiusPixels(String sessionId) {
+            float baseSize = baseSizePixels(sessionId);
+            float pulseSize = baseSize * ringScale(sessionId);
+            return max(baseSize, pulseSize) * 0.5f + 4f;
+        }
+
+        @Override
+        public String label(String sessionId) {
+            String name = userNames.getOrDefault(sessionId, "").trim();
+            return name.isEmpty() ? DEFAULT_USER_LABEL : name;
+        }
+
+        @Override
+        public float audioLevel(String sessionId) {
+            return userAudioLevels.getOrDefault(sessionId, new float[]{0f})[0];
+        }
+
+        @Override
+        public float dominantFrequency(String sessionId) {
+            return 0f;
+        }
+
+        @Override
+        public boolean supportsDominantFrequency() {
+            return false;
+        }
+
+        @Override
+        public float speed(String sessionId) {
+            float[] pos = userPositions.get(sessionId);
+            float[] targetPos = userTargetPositions.get(sessionId);
+            if (pos == null || targetPos == null) {
+                return 0f;
+            }
+            float dx = targetPos[0] - pos[0];
+            float dy = targetPos[1] - pos[1];
+            return sqrt(dx * dx + dy * dy);
+        }
+
+        @Override
+        public float sizeValue(String sessionId) {
+            return userSizes.getOrDefault(sessionId, DEFAULT_SIZE);
+        }
+
+        @Override
+        public void setSizeValue(String sessionId, float value) {
+            userSizes.put(sessionId, value);
+        }
+
+        @Override
+        public float gainValue(String sessionId) {
+            return userGains.getOrDefault(sessionId, DEFAULT_GAIN);
+        }
+
+        @Override
+        public void setGainValue(String sessionId, float value) {
+            userGains.put(sessionId, value);
+        }
+
+        @Override
+        public void setTargetPosition(String sessionId, float normalizedX, float normalizedY, boolean snapImmediately) {
+            float[] targetPos = userTargetPositions.get(sessionId);
+            float[] pos = userPositions.get(sessionId);
+            if (targetPos == null || pos == null) {
+                return;
+            }
+            targetPos[0] = normalizedX;
+            targetPos[1] = normalizedY;
+            if (snapImmediately) {
+                pos[0] = normalizedX;
+                pos[1] = normalizedY;
+            }
+        }
+
+        @Override
+        public void scatterAll() {
+            scatterAllUsers();
+        }
+
+        @Override
+        public void recenterAll() {
+            recenterAllUsers();
+        }
+    };
     
     private float globalAudioLevel = 0;
     private float smoothedGlobalAudioLevel = 0;
@@ -61,7 +161,7 @@ public class ProcessingSketch extends PApplet {
 
     @Override
     public void setup() {
-        surface.setResizable(false);
+        surface.setResizable(true);
         surface.setTitle("Processing Server - Multi-User Canvas");
         frameRate(60);
         background(0);
@@ -80,6 +180,9 @@ public class ProcessingSketch extends PApplet {
         processAudio();
         
         drawUsers();
+
+        localOperatorLayer.drawSelectionOverlay(this, localOperatorAdapter, 100f);
+        localOperatorLayer.drawLocalHud(this, localOperatorAdapter, 170f, 100f);
         
         drawAudioMeter();
     }
@@ -147,6 +250,12 @@ public class ProcessingSketch extends PApplet {
                 }
                 handleKeyEvent(sessionId, event);
             }
+            case "session-meta" -> {
+                if ("name".equals(event.controlId())) {
+                    userNames.put(sessionId, event.textValue());
+                }
+            }
+            case "session-ended" -> removeUser(sessionId);
         }
     }
 
@@ -288,10 +397,32 @@ public class ProcessingSketch extends PApplet {
         userMotion.put(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
         userLastMotionMagnitudes.put(sessionId, 0f);
         userKeyStates.put(sessionId, new HashMap<>());
+        userNames.putIfAbsent(sessionId, "");
         
         if (debugConfig.isLogging()) {
             println("Initialized user " + sessionId.substring(0, 8) + " at position (" 
                     + nf(position[0], 0, 2) + ", " + nf(position[1], 0, 2) + ")");
+        }
+    }
+
+    private void removeUser(String sessionId) {
+        localOperatorLayer.clearSelectionIfMatches(sessionId);
+        userPositions.remove(sessionId);
+        userTargetPositions.remove(sessionId);
+        userColors.remove(sessionId);
+        userAudioLevels.remove(sessionId);
+        userSizes.remove(sessionId);
+        userSpeeds.remove(sessionId);
+        userGains.remove(sessionId);
+        userPulseBoosts.remove(sessionId);
+        userHueVelocities.remove(sessionId);
+        userMotion.remove(sessionId);
+        userLastMotionMagnitudes.remove(sessionId);
+        userKeyStates.remove(sessionId);
+        userNames.remove(sessionId);
+
+        if (debugConfig.isLogging()) {
+            println("Removed user state for " + sessionId.substring(0, 8));
         }
     }
     
@@ -362,9 +493,9 @@ public class ProcessingSketch extends PApplet {
             float[] color = userColors.getOrDefault(sessionId, new float[]{0, 50, 100});
             float[] audioLevel = userAudioLevels.getOrDefault(sessionId, new float[]{0});
             float sizeValue = userSizes.getOrDefault(sessionId, DEFAULT_SIZE);
-            float speedValue = userSpeeds.getOrDefault(sessionId, DEFAULT_SPEED);
             float pulseBoost = userPulseBoosts.getOrDefault(sessionId, 0f);
             float hueVelocity = userHueVelocities.getOrDefault(sessionId, 0f);
+            float speedValue = userSpeeds.getOrDefault(sessionId, DEFAULT_SPEED);
             float[] motion = userMotion.getOrDefault(sessionId, new float[]{0f, 0f, 0f, 0f, 0f, 0f, 0f});
 
             // One slider drives both movement response and how quickly temporary effects settle.
@@ -409,27 +540,94 @@ public class ProcessingSketch extends PApplet {
             
             fill(color[0], color[1], color[2]);
             noStroke();
-            ellipse(pos[0] * sketchWidth, pos[1] * sketchHeight, coreSize, coreSize);
+            ellipse(pos[0] * width, pos[1] * height, coreSize, coreSize);
             
             stroke(color[0], color[1] * 0.5f, color[2] * 0.5f);
             strokeWeight(2);
             noFill();
-            ellipse(pos[0] * sketchWidth, pos[1] * sketchHeight, pulseSize, pulseSize);
+            ellipse(pos[0] * width, pos[1] * height, pulseSize, pulseSize);
             
-            fill(0);
-            noStroke();
-            textAlign(CENTER, CENTER);
-            textSize(10);
-            String label = sessionId.substring(0, 4);
-            text(label, pos[0] * sketchWidth, pos[1] * sketchHeight);
+            if (localOperatorLayer.showNames()) {
+                fill(0);
+                noStroke();
+                textAlign(CENTER, CENTER);
+                float labelTextSize = constrain(coreSize * 0.2f, 10f, 18f);
+                textSize(labelTextSize);
+                String name = userNames.getOrDefault(sessionId, "").trim();
+                String label = name.isEmpty() ? DEFAULT_USER_LABEL : name;
+                text(label, pos[0] * width, pos[1] * height);
+            }
         }
     }
 
+    private float baseSizePixels(String sessionId) {
+        return map(userSizes.getOrDefault(sessionId, DEFAULT_SIZE), 0, 1, 20, 90);
+    }
+
+    private float ringScale(String sessionId) {
+        float[] audioLevel = userAudioLevels.getOrDefault(sessionId, new float[]{0});
+        float pulseBoost = userPulseBoosts.getOrDefault(sessionId, 0f);
+        return 1.5f * (1 + audioLevel[0] * 2 + pulseBoost * 1.8f);
+    }
+
+    private void scatterAllUsers() {
+        for (String sessionId : userPositions.keySet()) {
+            userTargetPositions.put(sessionId, findNonOverlappingPosition());
+            userPulseBoosts.put(sessionId, max(userPulseBoosts.getOrDefault(sessionId, 0f), 0.35f));
+        }
+    }
+
+    private void recenterAllUsers() {
+        int count = userPositions.size();
+        if (count == 0) {
+            return;
+        }
+
+        float radius = min(0.3f, 0.08f + count * 0.025f);
+        int index = 0;
+        for (String sessionId : userPositions.keySet()) {
+            float angle = TWO_PI * index / count;
+            float x = constrain(0.5f + cos(angle) * radius, 0.12f, 0.88f);
+            float y = constrain(0.5f + sin(angle) * radius, 0.16f, 0.84f);
+            float[] targetPos = userTargetPositions.get(sessionId);
+            if (targetPos != null) {
+                targetPos[0] = x;
+                targetPos[1] = y;
+            }
+            index++;
+        }
+    }
+
+    @Override
+    public void mousePressed() {
+        localOperatorLayer.mousePressed(this, localOperatorAdapter);
+    }
+
+    @Override
+    public void mouseDragged() {
+        localOperatorLayer.mouseDragged(this, localOperatorAdapter);
+    }
+
+    @Override
+    public void mouseReleased() {
+        localOperatorLayer.mouseReleased();
+    }
+
+    @Override
+    public void mouseWheel(MouseEvent event) {
+        localOperatorLayer.mouseWheel(this, event, localOperatorAdapter);
+    }
+
+    @Override
+    public void keyPressed() {
+        localOperatorLayer.keyPressed(key, localOperatorAdapter);
+    }
+
     private void drawAudioMeter() {
-        float meterWidth = sketchWidth * 0.8f;
+        float meterWidth = width * 0.8f;
         float meterHeight = 20;
-        float meterX = (sketchWidth - meterWidth) / 2;
-        float meterY = sketchHeight - 40;
+        float meterX = (width - meterWidth) / 2;
+        float meterY = height - 40;
         
         fill(30, 50, 30);
         noStroke();
@@ -443,14 +641,14 @@ public class ProcessingSketch extends PApplet {
         fill(255);
         textAlign(CENTER, CENTER);
         textSize(12);
-        text("Global Audio Level", sketchWidth / 2, meterY - 10);
+        text("Global Audio Level", width / 2f, meterY - 10);
         
         int activeSessions = audioBuffer.getActiveSessionCount();
         if (activeSessions > 0) {
             textSize(10);
             fill(200);
             text(activeSessions + " audio stream" + (activeSessions != 1 ? "s" : "") + " active", 
-                 sketchWidth / 2, meterY + meterHeight + 15);
+                 width / 2f, meterY + meterHeight + 15);
         }
     }
 
