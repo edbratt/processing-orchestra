@@ -1,0 +1,75 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.6 Chrome/144.0.7559.236 Electron/40.8.4 Safari/537.36" version="29.6.6">
+  <diagram name="Page-1" id="J14IVLUGuPGbb66Cuc6f">
+    <mxGraphModel dx="996" dy="859" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="GDxIF6zPGfln3HDM-EwK-2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="890" width="740" x="70" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-1" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="User" vertex="1">
+          <mxGeometry height="60" width="30" x="90" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Open browser to http://localhost:8080" vertex="1">
+          <mxGeometry height="60" width="140" x="173" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-10" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="498" y="310" as="sourcePoint" />
+            <mxPoint x="498" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-11" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="qV2FTbf2aPv-zclqZoTo-19" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="503" y="560" />
+            </Array>
+            <mxPoint x="498" y="560" as="sourcePoint" />
+            <mxPoint x="498" y="640" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Authorizes services as needed (e.g. audio, motion)" vertex="1">
+          <mxGeometry height="60" width="140" x="173" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Interacts with controls and/or generates audio, and/or generates motion data" vertex="1">
+          <mxGeometry height="60" width="140" x="173" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Closes browser session when done" vertex="1">
+          <mxGeometry height="60" width="140" x="173" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-18" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Helidon Server&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Serves the static browser page and JavaScript.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;When a browser opens `/ws`, the server creates one session for that user and keeps that user&#39;s data keyed by `sessionId`.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Control events are queued in order. Motion and audio arrive continuously while the page is active.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;When the page closes, the server removes the session, clears audio, and queues `session-ended` cleanup for the sketch.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="250" width="195" x="408" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-19" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Processing Sketch&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;One sketch starts once when the application launches and then runs its `draw()` loop continuously.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;On each draw cycle it processes queued control data and audio for all active sessions.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;The sketch can keep each user independent, combine multiple users, or do both, depending on the sketch logic.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;When a session ends, that user&#39;s sketch-side state is removed from the canvas.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="270" width="220" x="400.5" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-24" edge="1" parent="1" source="qV2FTbf2aPv-zclqZoTo-20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="qV2FTbf2aPv-zclqZoTo-18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-20" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Static HTML + JavaScript&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;The default browser control page includes:&lt;/div&gt;&lt;div&gt;- touch or mouse region&lt;/div&gt;&lt;div&gt;- buttons&lt;/div&gt;&lt;div&gt;- sliders&lt;/div&gt;&lt;div&gt;- keyboard input&lt;/div&gt;&lt;div&gt;- motion input&lt;/div&gt;&lt;div&gt;- microphone audio&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Control data are sent on user action. Motion and audio can stream continuously after permission is granted.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="230" width="210" x="400.5" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-27" edge="1" parent="1" source="qV2FTbf2aPv-zclqZoTo-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="qV2FTbf2aPv-zclqZoTo-20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-21" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Every browser has its own control page and session" vertex="1">
+          <mxGeometry height="60" width="100" x="653" y="215" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-26" edge="1" parent="1" source="qV2FTbf2aPv-zclqZoTo-22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="qV2FTbf2aPv-zclqZoTo-18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-22" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="One Helidon server maintains one session per connected browser" vertex="1">
+          <mxGeometry height="70" width="110" x="663" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-23" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="One Processing sketch processes data from every active session on each `draw()` cycle." vertex="1">
+          <mxGeometry height="90" width="135" x="673" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="qV2FTbf2aPv-zclqZoTo-25" edge="1" parent="1" source="qV2FTbf2aPv-zclqZoTo-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="qV2FTbf2aPv-zclqZoTo-19">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="619" y="874" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
