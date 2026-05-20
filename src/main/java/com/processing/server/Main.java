@@ -56,10 +56,11 @@ public final class Main {
         int height = config.get("processing.height").asInt().orElse(600);
 
         String sketchClassName = config.get("processing.sketch-class").asString().orElse(DEFAULT_SKETCH_CLASS);
+        ControllerConfig controllerConfig = ControllerConfig.forSketch(sketchClassName);
         startSketch(sketchClassName, eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
         ScheduledExecutorService sessionReaper = startSessionReaper(sessionManager, eventQueue, audioBuffer, debugConfig);
 
-        InputService inputService = new InputService(sessionManager, eventQueue, audioBuffer);
+        InputService inputService = new InputService(sessionManager, eventQueue, audioBuffer, controllerConfig);
         // Attach WebSocket handling to every listener we expose so the browser UI and sketch
         // stay in sync regardless of whether the page was loaded over HTTP or HTTPS.
         var serverBuilder = WebServer.builder()

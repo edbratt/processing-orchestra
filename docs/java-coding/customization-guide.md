@@ -1268,7 +1268,7 @@ mvn clean package -DskipTests
 We have written a separate AI Customization guide. 
 This guide includes sample prompts and information that you might want to provide your AI Coding agent when you want to customize your application.
 
-- [AI_CUSTOMIZATION_GUIDE.md](AI_CUSTOMIZATION_GUIDE.md)
+- [AI_CUSTOMIZATION_GUIDE.md](../work-in-progress/AI_CUSTOMIZATION_GUIDE.md)
 
 This guide will give you:
 
@@ -1411,7 +1411,7 @@ Contents:
 **Symptom:** Users spawn at same position.
 
 **Solutions:**
-1. Implement `findNonOverlappingPosition()` (see ARCHITECTURE.md)
+1. Implement `findNonOverlappingPosition()` (see [Architecture](../architecture.md))
 2. Check position bounds (0-1 range)
 3. Store positions in `Map<String, float[]>`
 

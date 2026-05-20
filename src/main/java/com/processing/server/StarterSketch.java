@@ -16,6 +16,10 @@ public class StarterSketch extends PApplet {
     private float markerY = 0.5f;
     private float markerSize = 48f;
     private String lastKey = "";
+    private PaletteLibrary.ColorPalette palette;
+    private int lineColor;
+    private int markerColor;
+    private int textColor;
 
     public StarterSketch(EventQueue eventQueue,
                          AudioBuffer audioBuffer,
@@ -38,21 +42,25 @@ public class StarterSketch extends PApplet {
         surface.setResizable(true);
         surface.setTitle("Processing Server - Starter Sketch");
         strokeWeight(6);
+        palette = PaletteLibrary.randomDefault(this);
+        lineColor = palette.accent();
+        markerColor = palette.colorAt(1);
+        textColor = palette.foreground();
     }
 
     @Override
     public void draw() {
         processEvents();
-        background(245);
+        background(palette.background());
 
-        stroke(40, 90, 180);
+        stroke(lineColor);
         line(lineX, 0, lineX, height);
 
         noStroke();
-        fill(240, 120, 40);
+        fill(markerColor);
         ellipse(markerX * width, markerY * height, markerSize, markerSize);
 
-        fill(20);
+        fill(textColor);
         textAlign(LEFT, TOP);
         text("Touch moves the circle. Arrows/WASD move it. Space reverses the line.", 16, 16);
         text("Last key: " + (lastKey.isBlank() ? "-" : lastKey), 16, 34);
@@ -89,7 +97,13 @@ public class StarterSketch extends PApplet {
             case "ArrowRight", "d", "D" -> markerX = constrain(markerX + 0.05f, 0.05f, 0.95f);
             case "ArrowUp", "w", "W" -> markerY = constrain(markerY - 0.05f, 0.1f, 0.9f);
             case "ArrowDown", "s", "S" -> markerY = constrain(markerY + 0.05f, 0.1f, 0.9f);
-            case " ", "Space", "Spacebar" -> speed *= -1f;
+            case " ", "Space", "Spacebar" -> {
+                speed *= -1f;
+                palette = PaletteLibrary.randomDefault(this);
+                lineColor = palette.accent();
+                markerColor = palette.randomColor(this);
+                textColor = palette.foreground();
+            }
             default -> {
             }
         }

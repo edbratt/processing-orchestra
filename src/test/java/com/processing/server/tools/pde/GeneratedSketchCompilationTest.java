@@ -23,6 +23,7 @@ class GeneratedSketchCompilationTest {
         assertCompiles("mouse-follow.pde");
         assertCompiles("keyboard-toggle.pde");
         assertCompiles("helper-drawing.pde");
+        assertCompiles("top-level-class-p3d.pde");
         assertCompiles("browser-touch-safe.pde", MigrationMode.BROWSER_TOUCH);
         assertCompiles("keyboard-toggle.pde", MigrationMode.BROWSER_KEYBOARD);
         assertCompiles("helper-trails.pde", MigrationMode.BROWSER_TOUCH_PRESS);

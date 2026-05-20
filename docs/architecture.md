@@ -71,7 +71,8 @@ flowchart LR
 ```
 
 Key details:
-- The browser UI is served from `index.html` and exposes touch input, sliders, buttons, microphone capture, and optional phone motion sensors.
+- The browser UI is served from `index.html`, then shaped by the active sketch's controller profile from `/api/controller`.
+- `ControllerConfig` maps the configured `processing.sketch-class` to the browser controls that sketch actually uses, such as touch, sliders, buttons, keyboard, audio, or motion.
 - The browser uses one `/ws` connection, but that channel carries two logical streams in parallel: JSON control messages and binary audio frames.
 - `WebSocketHandler` separates those streams and forwards them to the correct server-side structures.
 - `ProcessingSketch` consumes the shared session, event, and audio state and renders the combined visual result.
@@ -404,15 +405,17 @@ Visual model details:
 ### 8. index.html - Browser Client
 
 Responsibilities:
-- Renders the control UI and status text.
+- Renders the shared control shell and status text.
+- Fetches `/api/controller` and removes unused control sections for the active sketch.
 - Opens the shared WebSocket connection and reconnects when needed.
-- Captures pointer, slider, button, microphone, and motion input.
+- Captures only the enabled pointer, slider, button, keyboard, microphone, and motion input for the active sketch.
 - Displays disconnect or shutdown banners when the server goes away.
 
 Connection details:
 - The browser uses HTTP for page delivery and a matching `ws://` or `wss://` WebSocket for real-time input.
 - Shutdown or disconnect banners scroll the page to the top so users can see the message even if they were interacting lower on the page.
 - The page distinguishes a clean server shutdown notice from an unexpected disconnect.
+- The same `index.html` file can serve several sketch-specific controller UIs because disabled controls are removed before event handlers are registered.
 
 Control event details:
 - Touch and mouse positions are normalized before transmission so the sketch stays resolution-independent.
@@ -442,6 +445,7 @@ This diagram shows how control events, audio frames, and REST requests move thro
 flowchart LR
     Browser["Browser Client"] --> Static["Static assets"]
     Browser --> REST["REST /api/status"]
+    Browser --> Controller["REST /api/controller"]
     Browser --> Channel["WebSocket Channel /ws"]
 
     subgraph Streams["Shared WebSocket Stream"]
@@ -454,6 +458,7 @@ flowchart LR
     Json --> Queue["EventQueue"]
     Binary --> AudioBuffer["AudioBuffer"]
     REST --> InputService["InputService"]
+    Controller --> InputService
     InputService --> Sessions["SessionManager"]
     Queue --> Sketch["ProcessingSketch"]
     AudioBuffer --> Sketch
@@ -512,7 +517,7 @@ Contents:
 
 ### Add a New Event Type
 
-1. Frontend in `index.html`:
+1. Add the browser control to `index.html` and include it in the relevant `ControllerConfig` profile:
 
 ```javascript
 document.getElementById('newControl').addEventListener('input', (e) => {
@@ -520,7 +525,7 @@ document.getElementById('newControl').addEventListener('input', (e) => {
 });
 ```
 
-2. Backend in `ProcessingSketch.java`:
+2. Backend in the active sketch class:
 
 ```java
 case "newType" -> {
@@ -529,9 +534,10 @@ case "newType" -> {
 ```
 
 The general rule is:
+- `ControllerConfig` decides whether the control is visible for the active sketch
 - browser UI emits a JSON control message
 - `WebSocketHandler` parses it into a `UserInputEvent`
-- `ProcessingSketch` applies it inside `draw()`
+- the active sketch applies it inside `draw()`
 
 ### Add a New REST Endpoint
 
@@ -737,11 +743,22 @@ processing-server/
 |-- pom.xml                           # Maven build configuration
 |-- README.md                         # Getting started guide
 |-- docs/
+|   |-- README.md                    # Documentation index
 |   |-- architecture.md              # This file
+|   |-- top-level-flow.md            # Session-flow diagram wrapper
+|   |-- getting-started/
+|   |   `-- artists.md               # Running and trying sketches
 |   |-- java-coding/
-|   |   `-- customization-guide.md   # Customization guide
+|   |   |-- README.md                # Java coding guide index
+|   |   |-- customization-guide.md   # Customization guide
+|   |   `-- runtime-overview.md      # Runtime source walkthrough
+|   |-- sketches/
+|   |   |-- README.md                # Sketch docs index
+|   |   |-- samples-index.md         # Runnable sketch list
+|   |   |-- using-and-converting.md  # Sketch conversion workflow
+|   |   `-- gravity-orbit-tutorial.md # Gravity sketch tutorial
 |   `-- work-in-progress/
-|       `-- TODO.md                  # Follow-up tasks and ideas
+|       `-- README.md                # Planning/status notes index
 |-- CHANGELOG.md                      # Project change history
 |-- run.ps1                           # PowerShell run script
 |-- run.sh                            # Bash run script
@@ -753,18 +770,23 @@ processing-server/
 |-- processing-server-ca.cer          # Exported CA certificate
 |-- config/
 |   `-- application-https.yaml        # HTTPS overlay config for -Dapp.config
+|-- generated-src/
+|   `-- main/java/com/processing/server/ # Generated sketch examples
 |-- src/
 |   `-- main/
 |       |-- java/com/processing/server/
 |       |   |-- Main.java             # Entry point, config loading, route setup
 |       |   |-- ProcessingSketch.java # Processing canvas and visual behavior
+|       |   |-- ControllerConfig.java # Per-sketch browser controller profile
 |       |   |-- WebSocketHandler.java # WebSocket lifecycle and control/audio ingress
 |       |   |-- InputService.java     # REST API handlers
 |       |   |-- SessionManager.java   # User session tracking
 |       |   |-- EventQueue.java       # Thread-safe event queue
 |       |   |-- AudioBuffer.java      # Per-session audio queue
 |       |   |-- AudioConfig.java      # Audio configuration record
+|       |   |-- MotionConfig.java     # Motion clamp and mapping config
 |       |   |-- DebugConfig.java      # Debug logging flag
+|       |   |-- PaletteLibrary.java   # Shared palette helpers
 |       |   `-- UserInputEvent.java   # Event data record
 |       `-- resources/
 |           |-- application.yaml      # Base local HTTP config

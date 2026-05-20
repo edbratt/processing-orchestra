@@ -28,7 +28,7 @@ There is now also a small local operator layer inside the Processing-side runtim
 
 The application starts in:
 
-- [Main.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/Main.java)
+- [Main.java](../../src/main/java/com/processing/server/Main.java)
 
 `Main.java` is the organizer for the whole runtime. Its main jobs are:
 
@@ -70,7 +70,7 @@ A few Java words appear often in this explanation:
 
 File:
 
-- [SessionManager.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/SessionManager.java)
+- [SessionManager.java](../../src/main/java/com/processing/server/SessionManager.java)
 
 What it does:
 
@@ -105,7 +105,7 @@ The answer starts here.
 
 File:
 
-- [EventQueue.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/EventQueue.java)
+- [EventQueue.java](../../src/main/java/com/processing/server/EventQueue.java)
 
 What it does:
 
@@ -130,7 +130,7 @@ Think of `EventQueue` as the sketch's inbox.
 
 File:
 
-- [AudioBuffer.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/AudioBuffer.java)
+- [AudioBuffer.java](../../src/main/java/com/processing/server/AudioBuffer.java)
 
 What it does:
 
@@ -152,7 +152,7 @@ If `EventQueue` is the control-message inbox, `AudioBuffer` is the audio inbox.
 
 File:
 
-- [WebSocketHandler.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/WebSocketHandler.java)
+- [WebSocketHandler.java](../../src/main/java/com/processing/server/WebSocketHandler.java)
 
 What it does:
 
@@ -178,7 +178,7 @@ The answer is mostly here.
 
 File:
 
-- [InputService.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/InputService.java)
+- [InputService.java](../../src/main/java/com/processing/server/InputService.java)
 
 What it does:
 
@@ -193,7 +193,7 @@ Not everything needs a live WebSocket. Some things are better handled as normal 
 
 File:
 
-- [ProcessingSketch.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/ProcessingSketch.java)
+- [ProcessingSketch.java](../../src/main/java/com/processing/server/ProcessingSketch.java)
 
 What it does:
 
@@ -212,7 +212,7 @@ This is the visual heart of the application. If you want to know how the circles
 
 File:
 
-- [LocalOperatorLayer.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/LocalOperatorLayer.java)
+- [LocalOperatorLayer.java](../../src/main/java/com/processing/server/LocalOperatorLayer.java)
 
 What it does:
 
@@ -234,7 +234,7 @@ That separation reduces confusion because local Processing-window shortcuts do n
 
 File:
 
-- [index.html](/C:/Users/ed/dev/processing-server/src/main/resources/static/index.html)
+- [index.html](../../src/main/resources/static/index.html)
 
 What it does:
 
@@ -286,7 +286,7 @@ The important idea is that the sketch and the server live in the same Java proce
 
 The browser files come from:
 
-- [src/main/resources/static](/C:/Users/ed/dev/processing-server/src/main/resources/static)
+- [src/main/resources/static](../../src/main/resources/static)
 
 When a user opens the page:
 
@@ -338,7 +338,7 @@ So the main idea is:
 
 The most important runtime path is in:
 
-- [WebSocketHandler.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/WebSocketHandler.java)
+- [WebSocketHandler.java](../../src/main/java/com/processing/server/WebSocketHandler.java)
 
 When the browser opens `/ws`, Helidon creates a new `WsSession` for that live socket connection.
 
@@ -503,7 +503,7 @@ That is a helpful mental model:
 
 Sketch-specific variations belong in the sketch-specific documents. For the gravity-orbit examples, see:
 
-- [GRAVITY_ORBIT_SKETCH_TUTORIAL.md](/C:/users/ed/dev/processing-server/GRAVITY_ORBIT_SKETCH_TUTORIAL.md:1)
+- [Gravity Orbit Tutorial](../sketches/gravity-orbit-tutorial.md)
 
 ## What Happens When A Client Disconnects
 
@@ -770,19 +770,19 @@ Then it draws the final visual result.
 
 If you are new to the codebase, read it in this order:
 
-1. [Main.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/Main.java)
+1. [Main.java](../../src/main/java/com/processing/server/Main.java)
    This shows how the application starts and how the major objects are connected.
-2. [WebSocketHandler.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/WebSocketHandler.java)
+2. [WebSocketHandler.java](../../src/main/java/com/processing/server/WebSocketHandler.java)
    This shows how live browser messages enter the Java side.
-3. [SessionManager.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/SessionManager.java)
+3. [SessionManager.java](../../src/main/java/com/processing/server/SessionManager.java)
    This shows how multiple users are kept separate.
-4. [EventQueue.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/EventQueue.java)
+4. [EventQueue.java](../../src/main/java/com/processing/server/EventQueue.java)
    This shows how control events wait for the sketch.
-5. [AudioBuffer.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/AudioBuffer.java)
+5. [AudioBuffer.java](../../src/main/java/com/processing/server/AudioBuffer.java)
    This shows how audio waits for the sketch.
-6. [ProcessingSketch.java](/C:/Users/ed/dev/processing-server/src/main/java/com/processing/server/ProcessingSketch.java)
+6. [ProcessingSketch.java](../../src/main/java/com/processing/server/ProcessingSketch.java)
    This shows how the default visual result is produced.
-7. [index.html](/C:/Users/ed/dev/processing-server/src/main/resources/static/index.html)
+7. [index.html](../../src/main/resources/static/index.html)
    This shows what the browser is sending in the first place.
 
 That reading order helps because it goes from system setup to input handling to final rendering.

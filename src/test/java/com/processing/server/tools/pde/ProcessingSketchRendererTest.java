@@ -91,6 +91,18 @@ class ProcessingSketchRendererTest {
         assertTrue(rendered.contains("TODO: Simple mouseDragged behavior was mapped to browser touch events automatically."));
     }
 
+    @Test
+    void rendersNestedTypesAndPreservesP3dRenderer() throws Exception {
+        Path path = fixturePath("top-level-class-p3d.pde");
+        PdeSketchModel model = new PdeStructureScanner().scan(path, Files.readString(path));
+
+        String rendered = new ProcessingSketchRenderer().render(model);
+
+        assertTrue(rendered.contains("size(sketchWidth, sketchHeight, P3D);"));
+        assertTrue(rendered.contains("class Blob {"));
+        assertTrue(rendered.contains("private Blob blob;"));
+    }
+
     private Path fixturePath(String fixtureName) throws IOException, URISyntaxException {
         return Path.of(getClass().getResource("/pde-fixtures/" + fixtureName).toURI());
     }

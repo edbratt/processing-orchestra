@@ -18,17 +18,27 @@ public class InputService implements HttpService {
     private final SessionManager sessionManager;
     private final EventQueue eventQueue;
     private final AudioBuffer audioBuffer;
+    private final ControllerConfig controllerConfig;
 
     public InputService(SessionManager sessionManager, EventQueue eventQueue) {
         this.sessionManager = sessionManager;
         this.eventQueue = eventQueue;
         this.audioBuffer = null;
+        this.controllerConfig = ControllerConfig.forSketch("com.processing.server.ProcessingSketch");
     }
 
     public InputService(SessionManager sessionManager, EventQueue eventQueue, AudioBuffer audioBuffer) {
+        this(sessionManager, eventQueue, audioBuffer, ControllerConfig.forSketch("com.processing.server.ProcessingSketch"));
+    }
+
+    public InputService(SessionManager sessionManager,
+                        EventQueue eventQueue,
+                        AudioBuffer audioBuffer,
+                        ControllerConfig controllerConfig) {
         this.sessionManager = sessionManager;
         this.eventQueue = eventQueue;
         this.audioBuffer = audioBuffer;
+        this.controllerConfig = controllerConfig;
     }
 
     @Override
@@ -37,6 +47,7 @@ public class InputService implements HttpService {
             .post("/event", this::handleEvent)
             .post("/session", this::createSession)
             .delete("/session/{id}", this::removeSession)
+            .get("/controller", this::getController)
             .get("/status", this::getStatus);
     }
 
@@ -76,6 +87,10 @@ public class InputService implements HttpService {
         } else {
             res.status(Status.NOT_FOUND_404).send();
         }
+    }
+
+    private void getController(ServerRequest req, ServerResponse res) {
+        res.status(Status.OK_200).send(controllerConfig.toJson());
     }
 
     private void getStatus(ServerRequest req, ServerResponse res) {

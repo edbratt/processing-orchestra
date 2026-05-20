@@ -71,6 +71,7 @@ public final class PdeToProcessingSketchMain {
         System.out.println("Source: " + model.sourcePath());
         System.out.println("Mode: " + model.mode());
         System.out.println("Fields found: " + model.fields().size());
+        System.out.println("Types found: " + model.types().size());
         System.out.println("Methods found: " + model.methods().size());
         System.out.println();
 
@@ -78,6 +79,14 @@ public final class PdeToProcessingSketchMain {
             System.out.println("Top-level fields:");
             for (PdeField field : model.fields()) {
                 System.out.println("- " + firstLine(field.declaration()));
+            }
+            System.out.println();
+        }
+
+        if (!model.types().isEmpty()) {
+            System.out.println("Top-level types:");
+            for (PdeType type : model.types()) {
+                System.out.println("- " + type.name());
             }
             System.out.println();
         }

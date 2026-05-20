@@ -206,7 +206,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Processing Server UI</h1>
+        <h1 id="controllerTitle">Processing Server UI</h1>
         <div class="banner warning" id="connectionBanner"></div>
         <div class="session-info">
             Session ID: <span id="sessionId">connecting...</span>
@@ -228,17 +228,17 @@
         </div>
         
         <div class="controls">
-            <div class="control-group">
+            <div class="control-group" id="sizeSliderGroup">
                 <label>Size Slider: <span id="sizeValue">50</span>%</label>
                 <input type="range" id="sizeSlider" min="0" max="100" value="50">
             </div>
             
-            <div class="control-group">
+            <div class="control-group" id="speedSliderGroup">
                 <label>Speed Slider: <span id="speedValue">50</span>%</label>
                 <input type="range" id="speedSlider" min="0" max="100" value="50">
             </div>
             
-            <div class="control-group">
+            <div class="control-group" id="actionButtonsGroup">
                 <label>Action Buttons</label>
                 <div class="buttons">
                     <button id="btnAction1">Burst</button>
@@ -247,7 +247,7 @@
                 </div>
             </div>
             
-            <div class="control-group">
+            <div class="control-group" id="audioGroup">
                 <label>Audio Input</label>
                 <div class="audio-status">
                     <div class="audio-indicator" id="audioIndicator"></div>
@@ -275,7 +275,7 @@
                 </div>
             </div>
 
-            <div class="control-group">
+            <div class="control-group" id="motionGroup">
                 <label>Motion Input</label>
                 <div class="audio-status">
                     <div class="audio-indicator" id="motionIndicator"></div>
@@ -299,7 +299,7 @@
                 </div>
             </div>
 
-            <div class="control-group">
+            <div class="control-group" id="keyboardGroup">
                 <label>Mobile Keyboard Input</label>
                 <div style="font-size: 12px; color: #bbb; line-height: 1.5;">
                     <div>Status: <span id="keyboardStatus">Waiting for page focus</span></div>
@@ -370,6 +370,68 @@
         let reconnectTimerId = null;
         let heartbeatTimerId = null;
         let pageUnloading = false;
+        let controllerConfig = {
+            title: 'Processing Server UI',
+            features: {
+                touch: true,
+                sizeSlider: true,
+                speedSlider: true,
+                actionButtons: true,
+                audio: true,
+                motion: true,
+                keyboard: true
+            }
+        };
+
+        const sectionIdsByFeature = {
+            touch: ['touchArea'],
+            sizeSlider: ['sizeSliderGroup'],
+            speedSlider: ['speedSliderGroup'],
+            actionButtons: ['actionButtonsGroup'],
+            audio: ['audioGroup'],
+            motion: ['motionGroup'],
+            keyboard: ['keyboardGroup']
+        };
+
+        function hasFeature(name) {
+            return controllerConfig.features?.[name] === true;
+        }
+
+        function element(id) {
+            return document.getElementById(id);
+        }
+
+        function on(id, eventName, handler, options) {
+            const target = element(id);
+            if (target) {
+                target.addEventListener(eventName, handler, options);
+            }
+        }
+
+        async function loadControllerConfig() {
+            try {
+                const response = await fetch('/api/controller', { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error(`Controller config request failed: ${response.status}`);
+                }
+                controllerConfig = await response.json();
+            } catch (err) {
+                log('Using default controller config', err);
+            }
+            applyControllerConfig();
+        }
+
+        function applyControllerConfig() {
+            element('controllerTitle').textContent = controllerConfig.title || 'Processing Server UI';
+            document.title = controllerConfig.title || 'Processing Server UI';
+
+            for (const [feature, ids] of Object.entries(sectionIdsByFeature)) {
+                if (hasFeature(feature)) {
+                    continue;
+                }
+                ids.forEach((id) => element(id)?.remove());
+            }
+        }
         
         // Check URL parameters for debug mode
         if (new URLSearchParams(window.location.search).has('debug')) {
@@ -408,8 +470,11 @@
         }
         
         function updateAudioUI() {
+            if (!hasFeature('audio')) {
+                return;
+            }
             if (!canAccessMicrophone()) {
-                document.getElementById('audioWarning').style.display = 'block';
+                element('audioWarning').style.display = 'block';
             }
         }
 
@@ -427,11 +492,14 @@
         }
 
         function updateMotionUI() {
-            const status = document.getElementById('motionStatusText');
-            const indicator = document.getElementById('motionIndicator');
-            const startButton = document.getElementById('btnStartMotion');
-            const stopButton = document.getElementById('btnStopMotion');
-            const details = document.getElementById('motionDetails');
+            if (!hasFeature('motion')) {
+                return;
+            }
+            const status = element('motionStatusText');
+            const indicator = element('motionIndicator');
+            const startButton = element('btnStartMotion');
+            const stopButton = element('btnStopMotion');
+            const details = element('motionDetails');
 
             indicator.classList.remove('active', 'error');
 
@@ -465,7 +533,9 @@
         }
 
         function updateKeyboardStatus(text) {
-            document.getElementById('keyboardStatus').textContent = text;
+            if (hasFeature('keyboard')) {
+                element('keyboardStatus').textContent = text;
+            }
         }
 
         function saveSessionNameLocally(name) {
@@ -533,8 +603,11 @@
         }
 
         function setKeyboardPanelOpen(isOpen) {
+            if (!hasFeature('keyboard')) {
+                return;
+            }
             mobileKeyboardOpen = isOpen;
-            document.getElementById('keyboardPanel').classList.toggle('open', isOpen);
+            element('keyboardPanel').classList.toggle('open', isOpen);
         }
 
         function shouldCaptureKeyboard(event) {
@@ -926,10 +999,13 @@
         }
         
         function updateAudioConfigDisplay() {
+            if (!hasFeature('audio')) {
+                return;
+            }
             const channels = audioConfig.channels === 2 ? 'Stereo' : 'Mono';
-            document.getElementById('audioConfigInfo').textContent = 
+            element('audioConfigInfo').textContent = 
                 `Audio: ${audioConfig.sampleRate}Hz ${channels}`;
-            document.getElementById('audioFormat').textContent = 
+            element('audioFormat').textContent = 
                 `${audioConfig.sampleRate}Hz/${channels}`;
         }
         
@@ -950,6 +1026,9 @@
         }
         
         async function startAudio() {
+            if (!hasFeature('audio')) {
+                return;
+            }
             if (!canAccessMicrophone()) {
                 alert('Microphone access requires HTTPS.\n\n' +
                       'Options:\n' +
@@ -1110,6 +1189,9 @@
         }
         
         function stopAudio() {
+            if (!hasFeature('audio')) {
+                return;
+            }
             audioRunning = false;
             
             if (audioIntervalId) {
@@ -1189,6 +1271,9 @@
         }
         
         function updateAudioMeter(inputBuffer, length, channels) {
+            if (!hasFeature('audio')) {
+                return;
+            }
             let sum = 0;
             for (let channel = 0; channel < channels; channel++) {
                 const channelData = inputBuffer.getChannelData(channel);
@@ -1206,115 +1291,123 @@
             }
         }
         
-        const touchArea = document.getElementById('touchArea');
-        
-        touchArea.addEventListener('touchstart', handleTouch, { passive: false });
-        touchArea.addEventListener('touchmove', handleTouch, { passive: false });
-        touchArea.addEventListener('mousedown', handleMouse);
-        touchArea.addEventListener('mousemove', (e) => {
-            if (e.buttons === 1) handleMouse(e);
-        });
-        
         function handleTouch(e) {
             e.preventDefault();
             const touch = e.touches[0];
-            const rect = touchArea.getBoundingClientRect();
+            const rect = element('touchArea').getBoundingClientRect();
             const x = (touch.clientX - rect.left) / rect.width;
             const y = (touch.clientY - rect.top) / rect.height;
             sendEvent('touch', 'touchArea', 0, x, y);
         }
         
         function handleMouse(e) {
-            const rect = touchArea.getBoundingClientRect();
+            const rect = element('touchArea').getBoundingClientRect();
             const x = (e.clientX - rect.left) / rect.width;
             const y = (e.clientY - rect.top) / rect.height;
             sendEvent('touch', 'touchArea', 0, x, y);
         }
-        
-        document.getElementById('sizeSlider').addEventListener('input', (e) => {
-            const value = e.target.value / 100;
-            document.getElementById('sizeValue').textContent = e.target.value;
-            sendEvent('slider', 'sizeSlider', value);
-        });
-        
-        document.getElementById('speedSlider').addEventListener('input', (e) => {
-            const value = e.target.value / 100;
-            document.getElementById('speedValue').textContent = e.target.value;
-            sendEvent('slider', 'speedSlider', value);
-        });
 
-        document.getElementById('gainSlider').addEventListener('input', (e) => {
-            const value = e.target.value / 100;
-            document.getElementById('gainValue').textContent = formatGainLabel(Number(e.target.value));
-            sendEvent('slider', 'gainSlider', value);
-        });
-
-        document.getElementById('motionTrimSlider').addEventListener('input', (e) => {
-            const sliderValue = Number(e.target.value);
-            const normalized = sliderValue / 100;
-            motionTrim = Math.pow(2, (normalized - 0.5) * 3);
-            document.getElementById('motionTrimValue').textContent = formatMotionTrimLabel(sliderValue);
-        });
-        
-        document.getElementById('btnAction1').addEventListener('click', () => {
-            sendEvent('button', 'action1');
-        });
-        
-        document.getElementById('btnAction2').addEventListener('click', () => {
-            sendEvent('button', 'action2');
-        });
-        
-        document.getElementById('btnAction3').addEventListener('click', () => {
-            sendEvent('button', 'action3');
-        });
-        
-        document.getElementById('btnStartAudio').addEventListener('click', startAudio);
-        document.getElementById('btnStopAudio').addEventListener('click', stopAudio);
-        document.getElementById('btnStartMotion').addEventListener('click', startMotion);
-        document.getElementById('btnStopMotion').addEventListener('click', stopMotion);
-        document.getElementById('btnSaveSessionName').addEventListener('click', sendSessionMetaUpdate);
-        document.getElementById('sessionNameInput').addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                sendSessionMetaUpdate();
-            }
-        });
-        document.getElementById('btnOpenKeyboard').addEventListener('click', openMobileKeyboard);
-        document.getElementById('btnHideKeyboard').addEventListener('click', closeMobileKeyboard);
-        document.getElementById('mobileKeyboardInput').addEventListener('focus', () => {
-            setKeyboardPanelOpen(true);
-            updateKeyboardStatus('Keyboard active');
-        });
-        document.getElementById('mobileKeyboardInput').addEventListener('blur', () => {
-            if (!document.hasFocus()) {
-                return;
-            }
-            updateKeyboardStatus('Ready');
-        });
-        document.getElementById('mobileKeyboardInput').addEventListener('keydown', (event) => {
-            if (event.key === 'Backspace' || event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                updateKeyboardStatus('Keyboard active');
-                sendSyntheticKeyTap(event.key === ' ' ? ' ' : event.key, event.keyCode || keyCodeForCharacter(event.key));
-                event.target.value = '';
-            }
-        });
-        document.getElementById('mobileKeyboardInput').addEventListener('input', (event) => {
-            const value = event.target.value;
-            if (!value) {
-                return;
+        function wireControllerEvents() {
+            if (hasFeature('touch')) {
+                on('touchArea', 'touchstart', handleTouch, { passive: false });
+                on('touchArea', 'touchmove', handleTouch, { passive: false });
+                on('touchArea', 'mousedown', handleMouse);
+                on('touchArea', 'mousemove', (e) => {
+                    if (e.buttons === 1) handleMouse(e);
+                });
             }
 
-            updateKeyboardStatus('Keyboard active');
-            for (const character of value) {
-                sendSyntheticKeyTap(character, keyCodeForCharacter(character));
+            if (hasFeature('sizeSlider')) {
+                on('sizeSlider', 'input', (e) => {
+                    const value = e.target.value / 100;
+                    element('sizeValue').textContent = e.target.value;
+                    sendEvent('slider', 'sizeSlider', value);
+                });
             }
-            event.target.value = '';
-        });
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('keyup', handleKeyUp);
-        window.addEventListener('focus', () => updateKeyboardStatus('Ready'));
-        window.addEventListener('blur', releaseAllKeys);
+
+            if (hasFeature('speedSlider')) {
+                on('speedSlider', 'input', (e) => {
+                    const value = e.target.value / 100;
+                    element('speedValue').textContent = e.target.value;
+                    sendEvent('slider', 'speedSlider', value);
+                });
+            }
+
+            if (hasFeature('audio')) {
+                on('gainSlider', 'input', (e) => {
+                    const value = e.target.value / 100;
+                    element('gainValue').textContent = formatGainLabel(Number(e.target.value));
+                    sendEvent('slider', 'gainSlider', value);
+                });
+                on('btnStartAudio', 'click', startAudio);
+                on('btnStopAudio', 'click', stopAudio);
+            }
+
+            if (hasFeature('motion')) {
+                on('motionTrimSlider', 'input', (e) => {
+                    const sliderValue = Number(e.target.value);
+                    const normalized = sliderValue / 100;
+                    motionTrim = Math.pow(2, (normalized - 0.5) * 3);
+                    element('motionTrimValue').textContent = formatMotionTrimLabel(sliderValue);
+                });
+                on('btnStartMotion', 'click', startMotion);
+                on('btnStopMotion', 'click', stopMotion);
+            }
+
+            if (hasFeature('actionButtons')) {
+                on('btnAction1', 'click', () => sendEvent('button', 'action1'));
+                on('btnAction2', 'click', () => sendEvent('button', 'action2'));
+                on('btnAction3', 'click', () => sendEvent('button', 'action3'));
+            }
+
+            on('btnSaveSessionName', 'click', sendSessionMetaUpdate);
+            on('sessionNameInput', 'keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    sendSessionMetaUpdate();
+                }
+            });
+
+            if (hasFeature('keyboard')) {
+                on('btnOpenKeyboard', 'click', openMobileKeyboard);
+                on('btnHideKeyboard', 'click', closeMobileKeyboard);
+                on('mobileKeyboardInput', 'focus', () => {
+                    setKeyboardPanelOpen(true);
+                    updateKeyboardStatus('Keyboard active');
+                });
+                on('mobileKeyboardInput', 'blur', () => {
+                    if (!document.hasFocus()) {
+                        return;
+                    }
+                    updateKeyboardStatus('Ready');
+                });
+                on('mobileKeyboardInput', 'keydown', (event) => {
+                    if (event.key === 'Backspace' || event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        updateKeyboardStatus('Keyboard active');
+                        sendSyntheticKeyTap(event.key === ' ' ? ' ' : event.key, event.keyCode || keyCodeForCharacter(event.key));
+                        event.target.value = '';
+                    }
+                });
+                on('mobileKeyboardInput', 'input', (event) => {
+                    const value = event.target.value;
+                    if (!value) {
+                        return;
+                    }
+
+                    updateKeyboardStatus('Keyboard active');
+                    for (const character of value) {
+                        sendSyntheticKeyTap(character, keyCodeForCharacter(character));
+                    }
+                    event.target.value = '';
+                });
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('keyup', handleKeyUp);
+                window.addEventListener('focus', () => updateKeyboardStatus('Ready'));
+                window.addEventListener('blur', releaseAllKeys);
+            }
+        }
+
         window.addEventListener('pagehide', () => {
             pageUnloading = true;
             if (reconnectTimerId !== null) {
@@ -1333,13 +1426,20 @@
             }
         });
         
-        // Initialize
-        updateAudioUI();
-        detectMotionSupport();
-        document.getElementById('sessionNameInput').value = loadSavedSessionName();
-        document.getElementById('motionTrimValue').textContent = formatMotionTrimLabel(50);
-        updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
-        connect();
+        async function initializeController() {
+            await loadControllerConfig();
+            wireControllerEvents();
+            updateAudioUI();
+            detectMotionSupport();
+            element('sessionNameInput').value = loadSavedSessionName();
+            if (hasFeature('motion')) {
+                element('motionTrimValue').textContent = formatMotionTrimLabel(50);
+            }
+            updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
+            connect();
+        }
+
+        initializeController();
     </script>
 </body>
 </html>

@@ -10,6 +10,7 @@ final class MigrationReportRenderer {
         out.append("## Summary").append(System.lineSeparator()).append(System.lineSeparator());
         out.append("- Source file: `").append(model.sourcePath().getFileName()).append("`").append(System.lineSeparator());
         out.append("- Fields found: ").append(model.fields().size()).append(System.lineSeparator());
+        out.append("- Types found: ").append(model.types().size()).append(System.lineSeparator());
         out.append("- Methods found: ").append(model.methods().size()).append(System.lineSeparator());
         out.append("- Lifecycle methods found: ").append(lifecycleSummary(model)).append(System.lineSeparator());
         out.append("- Generated file: `ProcessingSketchGenerated.java`").append(System.lineSeparator()).append(System.lineSeparator());

@@ -44,10 +44,13 @@ class PdeStructureScannerTest {
     }
 
     @Test
-    void flagsUnsupportedTopLevelClass() throws Exception {
-        PdeSketchModel model = scanFixture("unsupported-top-level-class.pde");
+    void capturesTopLevelClassAndSizeRenderer() throws Exception {
+        PdeSketchModel model = scanFixture("top-level-class-p3d.pde");
 
-        assertFalse(model.unsupportedReasons().isEmpty());
+        assertEquals(1, model.types().size());
+        assertEquals("Blob", model.types().getFirst().name());
+        assertTrue(model.unsupportedReasons().isEmpty());
+        assertEquals("P3D", model.sizeCall().renderer());
     }
 
     private PdeSketchModel scanFixture(String fixtureName) throws IOException, URISyntaxException {

@@ -39,6 +39,22 @@ function Get-LatestSourceWriteTime($rootDir) {
     return $latest
 }
 
+function Convert-PropertiesToArgs($properties) {
+    if ([string]::IsNullOrWhiteSpace($properties)) {
+        return @()
+    }
+    return $properties.Trim().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+}
+
+function Has-JavaLibraryPath($argsList) {
+    foreach ($arg in $argsList) {
+        if ($arg -like "-Djava.library.path=*") {
+            return $true
+        }
+    }
+    return $false
+}
+
 $jarPath = Get-LatestJar $scriptDir
 $configPath = Join-Path $scriptDir "config\application-https.yaml"
 $keystorePath = Join-Path $scriptDir "keystore.p12"
@@ -92,10 +108,13 @@ Write-Host "HTTPS config:  $configPath" -ForegroundColor Gray
 Write-Host "HTTPS keystore: $keystorePath" -ForegroundColor Gray
 Write-Host ""
 
-$javaArgs = @("-Dapp.config=$configPath")
-if (-not [string]::IsNullOrWhiteSpace($Properties)) {
-    $javaArgs += $Properties.Trim().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+$propertyArgs = Convert-PropertiesToArgs $Properties
+$javaArgs = @()
+if (-not (Has-JavaLibraryPath $propertyArgs)) {
+    $javaArgs += "-Djava.library.path=$env:WINDIR\System32"
 }
+$javaArgs += "-Dapp.config=$configPath"
+$javaArgs += $propertyArgs
 $javaArgs += "-jar"
 $javaArgs += $jarPath.FullName
 

@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Audio gain control in the browser UI and sketch processing path.
 - Additional sketch controls and effects for `Burst`, `Spin Color`, and `Scatter`.
 - Phone motion input over WebSocket, including tilt, shake, and browser-side motion trim controls.
-- New handoff and teaching docs in `HANDOFF.md`, `MOTION_INPUT_PLAN.md`, and `RUNTIME_OVERVIEW.md`.
+- New handoff and teaching docs in `docs/work-in-progress/HANDOFF.md`, `docs/work-in-progress/MOTION_INPUT_PLAN.md`, and `docs/java-coding/runtime-overview.md`.
 
 ### Changed
 - Build packaging now produces an executable shaded jar for `java -jar`.

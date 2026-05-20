@@ -35,6 +35,7 @@ final class ProcessingSketchRenderer {
         writeLifecycleHelpers(out, model);
         writeInputHandlers(out, model);
         writeHelperMethods(out, model);
+        writeTypes(out, model);
         writeRunSketch(out);
         out.append("}").append(System.lineSeparator());
         return out.toString();
@@ -85,8 +86,7 @@ final class ProcessingSketchRenderer {
     private void writeSettings(StringBuilder out, PdeSketchModel model) {
         PdeMethod settings = findMethodByName(model, "settings");
         out.append("    @Override").append(System.lineSeparator());
-        out.append("    public void settings() ").append(extractMethodBody(settings, "{" + System.lineSeparator()
-            + "        size(sketchWidth, sketchHeight, JAVA2D);" + System.lineSeparator() + "    }")).append(System.lineSeparator()).append(System.lineSeparator());
+        out.append("    public void settings() ").append(extractSettingsBody(settings, model)).append(System.lineSeparator()).append(System.lineSeparator());
     }
 
     private void writeSetup(StringBuilder out, PdeMethod setup) {
@@ -214,6 +214,12 @@ final class ProcessingSketchRenderer {
         }
     }
 
+    private void writeTypes(StringBuilder out, PdeSketchModel model) {
+        for (PdeType type : model.types()) {
+            out.append(indentTypeDeclaration(type.declaration())).append(System.lineSeparator()).append(System.lineSeparator());
+        }
+    }
+
     private void writeRunSketch(StringBuilder out) {
         out.append("    public void runSketch() {").append(System.lineSeparator());
         out.append("        String[] args = {this.getClass().getName()};").append(System.lineSeparator());
@@ -276,6 +282,23 @@ final class ProcessingSketchRenderer {
         return method == null ? fallback : extractBracedBody(method.body());
     }
 
+    private String extractSettingsBody(PdeMethod settings, PdeSketchModel model) {
+        if (settings != null) {
+            return extractBracedBody(settings.body());
+        }
+        if (model.sizeCall() != null) {
+            String renderer = model.sizeCall().renderer() == null || model.sizeCall().renderer().isBlank()
+                ? "JAVA2D"
+                : model.sizeCall().renderer();
+            return "{" + System.lineSeparator()
+                + "        size(sketchWidth, sketchHeight, " + renderer + ");" + System.lineSeparator()
+                + "    }";
+        }
+        return "{" + System.lineSeparator()
+            + "        size(sketchWidth, sketchHeight, JAVA2D);" + System.lineSeparator()
+            + "    }";
+    }
+
     private String cleanSetupBody(String body) {
         String[] lines = body.split("\\R", -1);
         StringBuilder out = new StringBuilder();
@@ -318,6 +341,26 @@ final class ProcessingSketchRenderer {
                 out.append(System.lineSeparator());
             } else {
                 out.append(indent).append(line.stripLeading()).append(System.lineSeparator());
+            }
+        }
+        return out.toString().stripTrailing();
+    }
+
+    private String indentTypeDeclaration(String declaration) {
+        String[] lines = declaration.split("\\R", -1);
+        if (lines.length == 0) {
+            return "";
+        }
+
+        StringBuilder out = new StringBuilder();
+        String firstLine = lines[0].trim().replaceFirst("^public\\s+", "");
+        out.append("    ").append(firstLine).append(System.lineSeparator());
+        for (int i = 1; i < lines.length; i++) {
+            String line = lines[i];
+            if (line.isBlank()) {
+                out.append(System.lineSeparator());
+            } else {
+                out.append("    ").append(line).append(System.lineSeparator());
             }
         }
         return out.toString().stripTrailing();

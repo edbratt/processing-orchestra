@@ -8,6 +8,7 @@ processing-client/
 
 Keystore files (generate your own with create-keystore.ps1 or create-keystore.sh)
 keystore.p12
+processing-server-ca.cer
 src/main/resources/keystore.p12
 
 IDE files
@@ -25,5 +26,7 @@ Temporary/testing artifacts
 io/
 pom_helidon.xml
 *.tmp
+*.bkp
+.tmp-startup.*
 .codex*
 .tmp-*/

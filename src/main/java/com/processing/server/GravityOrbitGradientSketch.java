@@ -36,6 +36,7 @@ public class GravityOrbitGradientSketch extends PApplet {
     private final Map<String, float[]> userTargetPositions = new HashMap<>();
     private final Map<String, float[]> userVelocities = new HashMap<>();
     private final Map<String, float[]> userColors = new HashMap<>();
+    private final Map<String, float[]> userAccentColors = new HashMap<>();
     private final Map<String, Float> userBaseHues = new HashMap<>();
     private final Map<String, float[]> userAudioLevels = new HashMap<>();
     private final Map<String, Float> userDominantFrequencies = new HashMap<>();
@@ -49,6 +50,7 @@ public class GravityOrbitGradientSketch extends PApplet {
     private final Map<String, Float> userLastMotionMagnitudes = new HashMap<>();
     private final Map<String, Map<Integer, Boolean>> userKeyStates = new HashMap<>();
     private final Map<String, String> userNames = new HashMap<>();
+    private PaletteLibrary.ColorPalette[] palettes;
     private final LocalOperatorLayer localOperatorLayer = new LocalOperatorLayer();
     private final LocalOperatorLayer.Adapter localOperatorAdapter = new LocalOperatorLayer.Adapter() {
         @Override
@@ -175,6 +177,7 @@ public class GravityOrbitGradientSketch extends PApplet {
         frameRate(60);
         background(0);
         colorMode(HSB, 360, 100, 100, 100);
+        palettes = PaletteLibrary.defaults(this).toArray(PaletteLibrary.ColorPalette[]::new);
         if (debugConfig.isLogging()) {
             println("Gravity orbit gradient sketch initialized: " + sketchWidth + "x" + sketchHeight);
         }
@@ -383,11 +386,15 @@ public class GravityOrbitGradientSketch extends PApplet {
 
     private void initializeUser(String sessionId) {
         float[] position = findNonOverlappingPosition();
+        PaletteLibrary.ColorPalette palette = paletteForSession(sessionId);
+        int baseColor = palette.colorForSession(sessionId);
+        int accentColor = palette.accent();
         userPositions.put(sessionId, position);
         userTargetPositions.put(sessionId, position.clone());
         userVelocities.put(sessionId, new float[]{0f, 0f});
-        float baseHue = random(360);
-        userColors.put(sessionId, new float[]{baseHue, random(26f, 42f), random(78f, 90f)});
+        float baseHue = hue(baseColor);
+        userColors.put(sessionId, new float[]{baseHue, saturation(baseColor), brightness(baseColor)});
+        userAccentColors.put(sessionId, new float[]{hue(accentColor), saturation(accentColor), brightness(accentColor)});
         userBaseHues.put(sessionId, baseHue);
         userSizes.put(sessionId, DEFAULT_SIZE);
         userDominantFrequencies.put(sessionId, 0f);
@@ -413,6 +420,7 @@ public class GravityOrbitGradientSketch extends PApplet {
         userTargetPositions.remove(sessionId);
         userVelocities.remove(sessionId);
         userColors.remove(sessionId);
+        userAccentColors.remove(sessionId);
         userBaseHues.remove(sessionId);
         userAudioLevels.remove(sessionId);
         userDominantFrequencies.remove(sessionId);
@@ -610,7 +618,8 @@ public class GravityOrbitGradientSketch extends PApplet {
             hueVelocity = lerp(hueVelocity, 0f, decay);
             pulseBoost = lerp(pulseBoost, 0f, decay);
 
-            color[0] = (frequencyHue + hueVelocity * animationSpeed + speedLevel * 54f + 360f) % 360f;
+            float targetHue = (frequencyHue + hueVelocity * animationSpeed + speedLevel * 54f + 360f) % 360f;
+            color[0] = lerpAngle(color[0], targetHue, 0.22f);
             color[1] = constrain(24f + level * 18f + speedLevel * 58f, 0f, 100f);
             color[2] = constrain(72f + level * 20f + speedLevel * 26f, 0f, 100f);
 
@@ -889,11 +898,16 @@ public class GravityOrbitGradientSketch extends PApplet {
         return (startHue + delta * amount + 360f) % 360f;
     }
 
+    private PaletteLibrary.ColorPalette paletteForSession(String sessionId) {
+        return palettes[PaletteLibrary.stableIndex(sessionId, palettes.length)];
+    }
+
     private void drawUsers() {
         for (Map.Entry<String, float[]> entry : userPositions.entrySet()) {
             String sessionId = entry.getKey();
             float[] pos = entry.getValue();
             float[] color = userColors.getOrDefault(sessionId, new float[]{0f, 50f, 100f});
+            float[] accent = userAccentColors.getOrDefault(sessionId, color);
             float coreSize = coreSizePixels(sessionId);
             float pulseSize = max(coreSize * 1.25f, baseSizePixels(sessionId) * ringScale(sessionId));
 
@@ -901,7 +915,8 @@ public class GravityOrbitGradientSketch extends PApplet {
             noStroke();
             ellipse(pos[0] * width, pos[1] * height, coreSize, coreSize);
 
-            stroke(color[0], color[1] * 0.5f, color[2] * 0.5f);
+            float ringHue = lerpAngle(accent[0], color[0], 0.35f);
+            stroke(ringHue, max(accent[1], color[1] * 0.55f), max(accent[2] * 0.75f, color[2] * 0.55f));
             strokeWeight(2);
             noFill();
             ellipse(pos[0] * width, pos[1] * height, pulseSize, pulseSize);

@@ -1,5 +1,60 @@
 # Handoff Notes
 
+## Latest Session: Diagram Workflow Handoff
+
+Date:
+- 2026-04-26
+
+Checkpoint commit:
+- `88f63bf` - `Add session flow diagram docs and SVG artifact`
+
+What was done in this session:
+- Added a session-focused architecture section to `docs/architecture.md`
+- Created `docs/top-level-flow.md` as the top-level session-flow doc page
+- Reworked the top-level diagram approach away from Mermaid layout control problems
+- Restored `top-level flow.drawio` as the primary editable diagram source
+- Added `docs/assets/top-level-flow.svg` as the markdown-rendered artifact
+- Updated `docs/top-level-flow.md` to embed the SVG instead of Mermaid
+- Marked the Draw.io file itself as the primary editable source
+
+Current diagram/doc workflow:
+- Edit the diagram in `top-level flow.drawio`
+- Export the rendered image to `docs/assets/top-level-flow.svg`
+- Keep `docs/top-level-flow.md` as the lightweight wrapper page that embeds the SVG
+- Treat the SVG as a generated documentation artifact, not the source of truth
+
+Why Mermaid was dropped for this diagram:
+- Mermaid kept reflowing the layout in ways that fought the intended reading order
+- Subgraphs and cross-links made placement unstable in VS Code and markdown previews
+- The Draw.io layout is better for this specific explanatory diagram because the visual arrangement matters
+
+Draw.io install status:
+- The Windows Store-managed install under `WindowsApps` was removed
+- A standalone install now exists at `C:\Program Files\draw.io\draw.io.exe`
+- The executable is visible and callable
+- In this Codex sandbox, CLI export attempts did not reliably emit an output file
+- Outside the sandbox, the next thing to test is local CLI export from a normal PowerShell session
+
+Suggested next step:
+- From a normal PowerShell window, test:
+
+```powershell
+& 'C:\Program Files\draw.io\draw.io.exe' -x -f svg -o '.\docs\assets\top-level-flow.svg' '.\top-level flow.drawio'
+```
+
+If that works:
+- keep the Draw.io -> SVG -> markdown workflow
+- optionally add a small `export-diagrams.ps1` helper script to the repo
+
+If it does not work:
+- inspect Draw.io desktop CLI requirements or flags on this machine
+- or choose a separate export helper instead of relying on Mermaid for layout
+
+Important repo-state note:
+- The diagram/docs checkpoint is safely committed in `88f63bf`
+- The worktree still contains many unrelated modified and untracked files
+- Do not roll those into a larger commit without first grouping them into coherent changes
+
 ## Current State
 
 The project is in a working state for:
@@ -204,9 +259,9 @@ Recent doc additions/updates relevant to the latest session:
   now describes session metadata and sketch-side disconnect cleanup
 - `RUNTIME_OVERVIEW.md`
   now explains that sketch-side state is removed on disconnect
-- `PROCESSING_ORCHESTRA_LIBRARY_GUIDE.md`
+- `docs/work-in-progress/PROCESSING_ORCHESTRA_LIBRARY_GUIDE.md`
   new lighter first-pass guide for the planned Processing IDE library
-- `PROCESSING_ORCHESTRA_LIBRARY_SPEC.md`
+- `docs/work-in-progress/PROCESSING_ORCHESTRA_LIBRARY_SPEC.md`
   still holds the more detailed implementation-oriented library design
 
 ### New Docs Added
@@ -266,8 +321,8 @@ Useful support docs:
 - `CUSTOMIZATION.md`
 - `MOTION_INPUT_PLAN.md`
 - `RUNTIME_OVERVIEW.md`
-- `PROCESSING_ORCHESTRA_LIBRARY_GUIDE.md`
-- `PROCESSING_ORCHESTRA_LIBRARY_SPEC.md`
+- `docs/work-in-progress/PROCESSING_ORCHESTRA_LIBRARY_GUIDE.md`
+- `docs/work-in-progress/PROCESSING_ORCHESTRA_LIBRARY_SPEC.md`
 
 ## Current Working Tree Notes
 

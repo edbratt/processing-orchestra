@@ -27,6 +27,7 @@ public class ProcessingSketch extends PApplet {
     // control how quickly each user's visuals respond.
     private final Map<String, float[]> userTargetPositions = new HashMap<>();
     private final Map<String, float[]> userColors = new HashMap<>();
+    private final Map<String, float[]> userAccentColors = new HashMap<>();
     private final Map<String, float[]> userAudioLevels = new HashMap<>();
     private final Map<String, Float> userSizes = new HashMap<>();
     private final Map<String, Float> userSpeeds = new HashMap<>();
@@ -37,6 +38,7 @@ public class ProcessingSketch extends PApplet {
     private final Map<String, Float> userLastMotionMagnitudes = new HashMap<>();
     private final Map<String, Map<Integer, Boolean>> userKeyStates = new HashMap<>();
     private final Map<String, String> userNames = new HashMap<>();
+    private PaletteLibrary.ColorPalette[] palettes;
     private final LocalOperatorLayer localOperatorLayer = new LocalOperatorLayer();
     private final LocalOperatorLayer.Adapter localOperatorAdapter = new LocalOperatorLayer.Adapter() {
         @Override
@@ -166,6 +168,7 @@ public class ProcessingSketch extends PApplet {
         frameRate(60);
         background(0);
         colorMode(HSB, 360, 100, 100);
+        palettes = PaletteLibrary.defaults(this).toArray(PaletteLibrary.ColorPalette[]::new);
         if (debugConfig.isLogging()) {
             println("Processing sketch initialized: " + sketchWidth + "x" + sketchHeight);
         }
@@ -386,9 +389,13 @@ public class ProcessingSketch extends PApplet {
     
     private void initializeUser(String sessionId) {
         float[] position = findNonOverlappingPosition();
+        PaletteLibrary.ColorPalette palette = paletteForSession(sessionId);
+        int baseColor = palette.colorForSession(sessionId);
+        int accentColor = palette.accent();
         userPositions.put(sessionId, position);
         userTargetPositions.put(sessionId, position.clone());
-        userColors.put(sessionId, new float[]{random(360), 70, 100});
+        userColors.put(sessionId, new float[]{hue(baseColor), saturation(baseColor), brightness(baseColor)});
+        userAccentColors.put(sessionId, new float[]{hue(accentColor), saturation(accentColor), brightness(accentColor)});
         userSizes.put(sessionId, DEFAULT_SIZE);
         userSpeeds.put(sessionId, DEFAULT_SPEED);
         userGains.put(sessionId, DEFAULT_GAIN);
@@ -410,6 +417,7 @@ public class ProcessingSketch extends PApplet {
         userPositions.remove(sessionId);
         userTargetPositions.remove(sessionId);
         userColors.remove(sessionId);
+        userAccentColors.remove(sessionId);
         userAudioLevels.remove(sessionId);
         userSizes.remove(sessionId);
         userSpeeds.remove(sessionId);
@@ -491,6 +499,7 @@ public class ProcessingSketch extends PApplet {
             float[] pos = entry.getValue();
             float[] targetPos = userTargetPositions.getOrDefault(sessionId, pos);
             float[] color = userColors.getOrDefault(sessionId, new float[]{0, 50, 100});
+            float[] accent = userAccentColors.getOrDefault(sessionId, color);
             float[] audioLevel = userAudioLevels.getOrDefault(sessionId, new float[]{0});
             float sizeValue = userSizes.getOrDefault(sessionId, DEFAULT_SIZE);
             float pulseBoost = userPulseBoosts.getOrDefault(sessionId, 0f);
@@ -542,7 +551,7 @@ public class ProcessingSketch extends PApplet {
             noStroke();
             ellipse(pos[0] * width, pos[1] * height, coreSize, coreSize);
             
-            stroke(color[0], color[1] * 0.5f, color[2] * 0.5f);
+            stroke(accent[0], accent[1], accent[2] * 0.8f);
             strokeWeight(2);
             noFill();
             ellipse(pos[0] * width, pos[1] * height, pulseSize, pulseSize);
@@ -562,6 +571,10 @@ public class ProcessingSketch extends PApplet {
 
     private float baseSizePixels(String sessionId) {
         return map(userSizes.getOrDefault(sessionId, DEFAULT_SIZE), 0, 1, 20, 90);
+    }
+
+    private PaletteLibrary.ColorPalette paletteForSession(String sessionId) {
+        return palettes[PaletteLibrary.stableIndex(sessionId, palettes.length)];
     }
 
     private float ringScale(String sessionId) {

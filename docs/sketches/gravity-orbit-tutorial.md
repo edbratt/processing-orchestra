@@ -52,8 +52,8 @@ But instead of immediately easing a circle straight to its target, the sketch no
 
 The two related sketches are:
 
-- [GravityOrbitSketch.java](/C:/users/ed/dev/processing-server/src/main/java/com/processing/server/GravityOrbitSketch.java:1)
-- [GravityOrbitGradientSketch.java](/C:/users/ed/dev/processing-server/src/main/java/com/processing/server/GravityOrbitGradientSketch.java:1)
+- [GravityOrbitSketch.java](../../src/main/java/com/processing/server/GravityOrbitSketch.java)
+- [GravityOrbitGradientSketch.java](../../src/main/java/com/processing/server/GravityOrbitGradientSketch.java)
 
 The gradient version is intentionally a copy-and-modify variant rather than a big abstraction layer. That makes it easier for a learner to compare the two files directly and see what changed.
 
@@ -68,7 +68,7 @@ Those methods create a soft background field using the same user positions and a
 
 The two gravity sketches now also share a reusable local Processing-window control layer through:
 
-- [LocalOperatorLayer.java](/C:/users/ed/dev/processing-server/src/main/java/com/processing/server/LocalOperatorLayer.java:1)
+- [LocalOperatorLayer.java](../../src/main/java/com/processing/server/LocalOperatorLayer.java)
 
 That means the local selection, drag, wheel, HUD, and pause/slow controls are no longer copied inline across the two files. Each sketch supplies an adapter that tells the shared helper how to read and update its own per-user state.
 
@@ -233,7 +233,7 @@ Originally, the gravity sketches only measured average audio level. Now they do 
 
 The sketches still poll audio from `AudioBuffer`, but they now pass each buffer into:
 
-- [AudioFeatureAnalyzer.java](/C:/users/ed/dev/processing-server/src/main/java/com/processing/server/AudioFeatureAnalyzer.java:1)
+- [AudioFeatureAnalyzer.java](../../src/main/java/com/processing/server/AudioFeatureAnalyzer.java)
 
 That helper:
 

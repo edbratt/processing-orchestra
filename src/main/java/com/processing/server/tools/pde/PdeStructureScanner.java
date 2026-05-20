@@ -7,13 +7,16 @@ import java.util.regex.Pattern;
 
 final class PdeStructureScanner {
     private static final Pattern TOP_LEVEL_TYPE_DECLARATION = Pattern.compile(
-        "^\\s*(?:public\\s+)?(?:class|interface|enum|record)\\b");
+        "^\\s*(?:public\\s+)?(?:class|interface|enum|record)\\s+(\\w+)\\b");
     private static final Pattern METHOD_START = Pattern.compile(
         "^\\s*(?!if\\b|for\\b|while\\b|switch\\b|catch\\b)(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?([\\w<>\\[\\]]+)\\s+(\\w+)\\s*\\([^;]*\\)\\s*\\{?\\s*$");
+    private static final Pattern SIZE_CALL = Pattern.compile(
+        "\\bsize\\s*\\(\\s*([^,]+?)\\s*,\\s*([^,\\)]+?)\\s*(?:,\\s*([^\\)]+?)\\s*)?\\)\\s*;");
 
     PdeSketchModel scan(java.nio.file.Path sourcePath, String rawSource) {
         List<String> lines = rawSource.lines().toList();
         List<PdeField> fields = new ArrayList<>();
+        List<PdeType> types = new ArrayList<>();
         List<PdeMethod> methods = new ArrayList<>();
         List<String> unsupportedReasons = new ArrayList<>();
 
@@ -34,8 +37,12 @@ final class PdeStructureScanner {
                 }
 
                 String trimmed = line.trim();
-                if (TOP_LEVEL_TYPE_DECLARATION.matcher(trimmed).find()) {
-                    unsupportedReasons.add("Top-level type declarations are not supported in v1: " + trimmed);
+                Matcher typeMatcher = TOP_LEVEL_TYPE_DECLARATION.matcher(trimmed);
+                if (typeMatcher.find()) {
+                    TypeCapture capture = captureType(lines, index, typeMatcher.group(1));
+                    types.add(capture.type());
+                    index = capture.nextIndex();
+                    continue;
                 }
                 if (!trimmed.isEmpty() && !trimmed.startsWith("//") && !trimmed.startsWith("import ")) {
                     topLevelStatement.append(line).append(System.lineSeparator());
@@ -61,12 +68,16 @@ final class PdeStructureScanner {
             fields.add(new PdeField(topLevelStatement.toString().trim()));
         }
 
+        PdeSizeCall sizeCall = parseSizeCall(methods);
+
         return new PdeSketchModel(
             sourcePath,
             rawSource,
             List.copyOf(fields),
+            List.copyOf(types),
             List.copyOf(methods),
             List.copyOf(unsupportedReasons),
+            sizeCall,
             MigrationMode.DEFAULT,
             containsToken(rawSource, "mouseX"),
             containsToken(rawSource, "mouseY"),
@@ -81,6 +92,35 @@ final class PdeStructureScanner {
             containsToken(rawSource, "key"),
             containsToken(rawSource, "keyCode")
         );
+    }
+
+    private TypeCapture captureType(List<String> lines, int startIndex, String typeName) {
+        StringBuilder buffer = new StringBuilder();
+        int depth = 0;
+        boolean seenOpeningBrace = false;
+        int index = startIndex;
+
+        while (index < lines.size()) {
+            String line = lines.get(index);
+            buffer.append(line).append(System.lineSeparator());
+
+            int opens = countChar(line, '{');
+            int closes = countChar(line, '}');
+            if (opens > 0) {
+                seenOpeningBrace = true;
+            }
+            depth += opens;
+            depth -= closes;
+
+            index++;
+            if (seenOpeningBrace && depth <= 0) {
+                break;
+            }
+        }
+
+        String declaration = buffer.toString().trim();
+        String signature = lines.get(startIndex).trim();
+        return new TypeCapture(new PdeType(signature, typeName, declaration), index);
     }
 
     private MethodCapture captureMethod(List<String> lines, int startIndex, String methodName) {
@@ -143,6 +183,24 @@ final class PdeStructureScanner {
         return methods.stream().anyMatch(method -> method.kind() == PdeMethodKind.INPUT_HANDLER && method.name().equals(name));
     }
 
+    private PdeSizeCall parseSizeCall(List<PdeMethod> methods) {
+        PdeMethod setup = methods.stream().filter(method -> "setup".equals(method.name())).findFirst().orElse(null);
+        if (setup == null) {
+            return null;
+        }
+        Matcher matcher = SIZE_CALL.matcher(setup.body());
+        if (!matcher.find()) {
+            return null;
+        }
+        String widthExpression = matcher.group(1).trim();
+        String heightExpression = matcher.group(2).trim();
+        String renderer = matcher.group(3) == null ? null : matcher.group(3).trim();
+        return new PdeSizeCall(widthExpression, heightExpression, renderer);
+    }
+
     private record MethodCapture(PdeMethod method, int nextIndex) {
+    }
+
+    private record TypeCapture(PdeType type, int nextIndex) {
     }
 }

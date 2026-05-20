@@ -39,6 +39,22 @@ function Get-LatestSourceWriteTime($rootDir) {
     return $latest
 }
 
+function Convert-PropertiesToArgs($properties) {
+    if ([string]::IsNullOrWhiteSpace($properties)) {
+        return @()
+    }
+    return $properties.Trim().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+}
+
+function Has-JavaLibraryPath($argsList) {
+    foreach ($arg in $argsList) {
+        if ($arg -like "-Djava.library.path=*") {
+            return $true
+        }
+    }
+    return $false
+}
+
 $jarPath = Get-LatestJar $scriptDir
 
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
@@ -77,10 +93,12 @@ if (-not $jarPath) {
     exit 1
 }
 
+$propertyArgs = Convert-PropertiesToArgs $Properties
 $javaArgs = @()
-if (-not [string]::IsNullOrWhiteSpace($Properties)) {
-    $javaArgs += $Properties.Trim().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+if (-not (Has-JavaLibraryPath $propertyArgs)) {
+    $javaArgs += "-Djava.library.path=$env:WINDIR\System32"
 }
+$javaArgs += $propertyArgs
 $javaArgs += "-jar"
 $javaArgs += $jarPath.FullName
 

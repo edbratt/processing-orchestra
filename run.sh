@@ -74,4 +74,18 @@ if [ -n "$PROPERTIES" ]; then
     read -r -a PROPERTY_ARGS <<< "$PROPERTIES"
 fi
 
-java "${PROPERTY_ARGS[@]}" -jar "$JAR_PATH"
+JAVA_LIBRARY_ARGS=()
+if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
+    HAS_JAVA_LIBRARY_PATH=0
+    for arg in "${PROPERTY_ARGS[@]}"; do
+        if [[ "$arg" == -Djava.library.path=* ]]; then
+            HAS_JAVA_LIBRARY_PATH=1
+            break
+        fi
+    done
+    if [ "$HAS_JAVA_LIBRARY_PATH" -eq 0 ]; then
+        JAVA_LIBRARY_ARGS+=("-Djava.library.path=${WINDIR:-C:\\Windows}\\System32")
+    fi
+fi
+
+java "${JAVA_LIBRARY_ARGS[@]}" "${PROPERTY_ARGS[@]}" -jar "$JAR_PATH"
