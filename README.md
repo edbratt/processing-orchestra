@@ -73,6 +73,7 @@ Core references:
 - [Architecture](docs/architecture.md)
 - [Top-Level Session Flow](docs/top-level-flow.md)
 - [V2 OSC Instrument Plan](docs/work-in-progress/V2_OSC_INSTRUMENT_PLAN.md)
+- [OSC Event Reference](docs/work-in-progress/OSC_EVENT_REFERENCE.md)
 - [Customization Guide](docs/java-coding/customization-guide.md)
 - [Runtime Overview](docs/java-coding/runtime-overview.md)
 

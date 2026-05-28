@@ -66,7 +66,7 @@ public class WebSocketHandler implements WsListener {
             .set("motionMagnitudeClampG", motionConfig.getMagnitudeClampG())
             .build();
         session.send(welcome.toString(), true);
-        logDebug("WebSocket opened for session: " + sessionId.substring(0, 8));
+        logSession("WebSocket opened", sessionInfo);
     }
 
     @Override
@@ -150,6 +150,16 @@ public class WebSocketHandler implements WsListener {
         float value = getFloat(json, "value", 0.0);
         float x = getFloat(json, "x", 0.0);
         float y = getFloat(json, "y", 0.0);
+
+        if (debugConfig.isLogging()) {
+            SessionManager.SessionInfo session = sessionManager.getSession(sessionId);
+            System.out.println("Event received: " + formatSession(sessionId, session)
+                + " type=\"" + eventType + "\""
+                + " controlId=\"" + json.stringValue("controlId", "") + "\""
+                + " value=" + value
+                + " x=" + x
+                + " y=" + y);
+        }
 
         UserInputEvent event = new UserInputEvent(
             sessionId,
@@ -249,6 +259,7 @@ public class WebSocketHandler implements WsListener {
                 : "")
             .build();
         session.send(ack.toString(), true);
+        logSession("Session metadata updated", sessionManager.getSession(sessionId));
     }
 
     private float getFloat(JsonObject json, String key, double defaultValue) {
@@ -295,11 +306,12 @@ public class WebSocketHandler implements WsListener {
     private void cleanupSession(String prefix, String suffix) {
         if (sessionId != null && cleanedUp.compareAndSet(false, true)) {
             String closingSessionId = sessionId;
+            SessionManager.SessionInfo closingSession = sessionManager.getSession(closingSessionId);
             eventQueue.push(new UserInputEvent(closingSessionId, "session-ended", "", "", System.currentTimeMillis()));
             sessionManager.removeSession(closingSessionId);
             audioBuffer.clearSession(closingSessionId);
             if (debugConfig.isLogging()) {
-                System.out.println(prefix + closingSessionId.substring(0, 8) + suffix);
+                System.out.println(prefix + formatSession(closingSessionId, closingSession) + suffix);
                 System.out.println("Session cleanup completed for " + closingSessionId.substring(0, 8)
                     + " (event queued, session removed, audio cleared)");
             } else if (!suffix.isBlank()) {
@@ -330,6 +342,28 @@ public class WebSocketHandler implements WsListener {
         if (debugConfig.isLogging()) {
             System.out.println(message);
         }
+    }
+
+    private void logSession(String action, SessionManager.SessionInfo sessionInfo) {
+        if (!debugConfig.isLogging()) {
+            return;
+        }
+        System.out.println(action + ": " + formatSession(sessionId, sessionInfo));
+    }
+
+    private String formatSession(String sessionId, SessionManager.SessionInfo sessionInfo) {
+        String shortId = sessionId == null ? "<none>" : sessionId.substring(0, Math.min(8, sessionId.length()));
+        if (sessionInfo == null) {
+            return shortId;
+        }
+        String name = sessionInfo.name() == null || sessionInfo.name().isBlank() ? "<blank>" : sessionInfo.name();
+        String instrument = sessionInfo.instrumentId() == null || sessionInfo.instrumentId().isBlank()
+            ? "<blank>"
+            : sessionInfo.instrumentId();
+        String stream = sessionInfo.streamId() == null || sessionInfo.streamId().isBlank()
+            ? "<default>"
+            : sessionInfo.streamId();
+        return shortId + " name=\"" + name + "\" instrument=\"" + instrument + "\" stream=\"" + stream + "\"";
     }
 
     private String shortSessionId() {

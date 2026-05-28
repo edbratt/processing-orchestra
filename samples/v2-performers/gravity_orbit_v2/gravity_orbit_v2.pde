@@ -30,10 +30,22 @@ import java.util.ArrayList;
 import java.util.HashMap;
 
 final int LISTEN_PORT = 12002;
-final float BASE_ATTRACTION = 0.0015;
-final float BASE_ORBIT = 0.00075;
-final float DAMPING = 0.93;
+final float PAIRWISE_ATTRACTION = 0.010;
+final float PAIRWISE_SOFTENING = 0.0025;
+final float MIN_PAIR_SEPARATION = 0.010;
+final float MAX_PAIRWISE_OFFSET = 0.055;
 final float MAX_SPEED = 0.026;
+final int PITCH_DISPLAY_HOLD_MS = 1100;
+final int PITCH_MIN_MIDI = 24;   // C1
+final int PITCH_MAX_MIDI = 108;  // C8
+final int PITCH_DEFAULT_MIN_MIDI = 48; // C3
+final int PITCH_DEFAULT_MAX_MIDI = 72;  // C5
+final int PITCH_DEFAULT_CENTER_MIDI = 60; // C4
+final float PITCH_VERTICAL_SPAN = 0.17;
+final int pitchRangeMinMidi = PITCH_DEFAULT_MIN_MIDI;
+final int pitchRangeMaxMidi = PITCH_DEFAULT_MAX_MIDI;
+final boolean DEBUG_LOGGING = false;
+final int DEBUG_MESSAGE_LIMIT = 12;
 
 OscP5 osc;
 
@@ -47,7 +59,12 @@ float anchorY = 0.5;
 float pulse = 0;
 int pingCount = 0;
 int nextBodyIndex = 0;
+int nextOrbiterInstanceId = 1;
+int debugMessageCount = 0;
+int debugFrameCount = 0;
+boolean physicsFrozen = false;
 
+final Object stateLock = new Object();
 HashMap<String, Orbiter> bodiesBySession = new HashMap<String, Orbiter>();
 
 void setup() {
@@ -64,50 +81,96 @@ void setup() {
 void draw() {
   background(0, 0, 4);
 
-  updateSharedAnchor();
+  synchronized (stateLock) {
+    debugFrameCount = frameCount;
+    updateSharedAnchor();
+    pulse = lerp(pulse, 0, 0.08);
 
-  pulse = lerp(pulse, 0, 0.08);
-
-  drawField();
-  updateBodies();
-  drawConnections();
-  drawAnchor();
-  drawHud();
+    boolean showGravityField = bodiesBySession.size() > 1;
+    if (showGravityField) {
+      drawField();
+    }
+    updateBodies();
+    drawConnections();
+    if (showGravityField) {
+      drawAnchor();
+    }
+    drawHud();
+    drawDebugHud();
+  }
 }
 
 void updateBodies() {
   ArrayList<Orbiter> bodies = activeBodies();
 
+  float[] baseX = new float[bodies.size()];
+  float[] baseY = new float[bodies.size()];
+  float[] offsetX = new float[bodies.size()];
+  float[] offsetY = new float[bodies.size()];
+
   for (int i = 0; i < bodies.size(); i++) {
     Orbiter body = bodies.get(i);
+    body.updatePitchState();
+    baseX[i] = body.targetX;
+    baseY[i] = body.effectiveTargetY();
+    body.preX = baseX[i];
+    body.preY = baseY[i];
+  }
 
-    float dx = body.targetX - body.x;
-    float dy = body.targetY - body.y;
-    float distSq = max(0.0004, dx * dx + dy * dy);
-    float dist = sqrt(distSq);
-    float nx = dx / dist;
-    float ny = dy / dist;
+  if (!physicsFrozen) {
+    for (int i = 0; i < bodies.size(); i++) {
+      for (int j = i + 1; j < bodies.size(); j++) {
+        float dx = baseX[j] - baseX[i];
+        float dy = baseY[j] - baseY[i];
+        float distSq = max(0.0004, dx * dx + dy * dy);
+        float dist = sqrt(distSq);
+        float nx = dx / dist;
+        float ny = dy / dist;
+        float minDist = bodies.get(i).radiusNormalized() + bodies.get(j).radiusNormalized() + MIN_PAIR_SEPARATION;
 
-    float attraction = BASE_ATTRACTION * (0.75 + pulse * 1.4) / distSq;
-    float orbitDirection = body.orbitDirection;
-    float orbit = BASE_ORBIT * (1.0 + body.phaseOffset * 0.12);
-
-    body.vx += nx * attraction + (-ny * orbit * orbitDirection);
-    body.vy += ny * attraction + (nx * orbit * orbitDirection);
-
-    for (int j = i + 1; j < bodies.size(); j++) {
-      pushApart(body, bodies.get(j));
+        if (dist < minDist) {
+          float overlap = minDist - dist;
+          float separation = overlap * 0.42;
+          offsetX[i] -= nx * separation;
+          offsetY[i] -= ny * separation;
+          offsetX[j] += nx * separation;
+          offsetY[j] += ny * separation;
+        } else {
+          float gravity = PAIRWISE_ATTRACTION / (distSq + PAIRWISE_SOFTENING);
+          float pull = gravity * (0.85 + pulse * 0.3);
+          offsetX[i] += nx * pull;
+          offsetY[i] += ny * pull;
+          offsetX[j] -= nx * pull;
+          offsetY[j] -= ny * pull;
+        }
+      }
     }
   }
 
-  for (Orbiter body : bodies) {
-    body.vx *= DAMPING;
-    body.vy *= DAMPING;
-    limitVelocity(body);
-    body.x += body.vx;
-    body.y += body.vy;
-    bounce(body);
+  for (int index = 0; index < bodies.size(); index++) {
+    Orbiter body = bodies.get(index);
+    float proposedX = baseX[index] + offsetX[index];
+    float proposedY = baseY[index] + offsetY[index];
+    float maxOffset = MAX_PAIRWISE_OFFSET;
+    float dx = proposedX - baseX[index];
+    float dy = proposedY - baseY[index];
+    float offsetMagSq = dx * dx + dy * dy;
+    if (offsetMagSq > maxOffset * maxOffset) {
+      float scale = maxOffset / sqrt(offsetMagSq);
+      proposedX = baseX[index] + dx * scale;
+      proposedY = baseY[index] + dy * scale;
+      dx *= scale;
+      dy *= scale;
+    }
+
+    body.x = constrain(proposedX, body.radiusNormalized(), 1 - body.radiusNormalized());
+    body.y = constrain(proposedY, body.radiusNormalized(), 1 - body.radiusNormalized());
+    body.vx = body.x - baseX[index];
+    body.vy = body.y - baseY[index];
     body.energy = lerp(body.energy, pulse, 0.08);
+    body.postX = body.x;
+    body.postY = body.y;
+    body.lastUpdateFrame = frameCount;
     body.draw();
   }
 }
@@ -123,7 +186,7 @@ void updateSharedAnchor() {
     float sy = 0;
     for (Orbiter body : bodies) {
       sx += body.targetX;
-      sy += body.targetY;
+      sy += body.effectiveTargetY();
     }
     anchorX = lerp(anchorX, sx / bodies.size(), 0.15);
     anchorY = lerp(anchorY, sy / bodies.size(), 0.15);
@@ -236,87 +299,141 @@ void drawHud() {
   textAlign(LEFT, TOP);
   text("gravity_orbit_v2  |  port " + LISTEN_PORT
     + "  |  collaborators=" + bodiesBySession.size()
-    + "  |  pings=" + pingCount,
+    + "  |  pings=" + pingCount
+    + "  |  field=" + (bodiesBySession.size() > 1 ? "on" : "hidden"),
     18, 16);
 }
 
+void drawDebugHud() {
+  if (!DEBUG_LOGGING) {
+    return;
+  }
+
+  fill(0, 0, 10, 70);
+  noStroke();
+  rect(16, 56, 420, min(220, 24 + bodiesBySession.size() * 18), 8);
+  fill(0, 0, 96, 95);
+  textAlign(LEFT, TOP);
+  textSize(11);
+  int y = 68;
+  text("debug | sessions=" + bodiesBySession.size() + " | pings=" + pingCount
+    + " | anchor=(" + nf(anchorX, 0, 2) + "," + nf(anchorY, 0, 2) + ")"
+    + " | field=" + (bodiesBySession.size() > 1 ? "visible" : "hidden")
+    + " | frame=" + debugFrameCount
+    + " | physics=" + (physicsFrozen ? "frozen" : "live"),
+    26, y);
+  y += 18;
+  int shown = 0;
+  for (Orbiter body : bodiesBySession.values()) {
+    if (shown >= 8) {
+      break;
+    }
+    text(shortSessionId(body.sessionId)
+      + " #"+ body.instanceId
+      + " " + body.labelForDebug()
+      + " " + body.debugState()
+      + " tgtY=" + nf(body.effectiveTargetY(), 0, 3)
+      + " pre=(" + nf(body.preX, 0, 3) + "," + nf(body.preY, 0, 3) + ")"
+      + " post=(" + nf(body.postX, 0, 3) + "," + nf(body.postY, 0, 3) + ")"
+      + " frame=" + body.lastUpdateFrame,
+      26,
+      y);
+    y += 18;
+    shown++;
+  }
+}
+
 void oscEvent(OscMessage msg) {
-  if (msg.checkAddrPattern("/session/join") && msg.checkTypetag("sss")) {
-    String sessionId = msg.get(0).stringValue();
-    String name = msg.get(1).stringValue();
-    String instrumentId = msg.get(2).stringValue();
-    getOrCreateBody(sessionId, name, instrumentId);
-    return;
-  }
+  synchronized (stateLock) {
+    if (msg.checkAddrPattern("/session/join") && msg.checkTypetag("sss")) {
+      String sessionId = msg.get(0).stringValue();
+      String name = msg.get(1).stringValue();
+      String instrumentId = msg.get(2).stringValue();
+      getOrCreateBody(sessionId, name, instrumentId);
+      logDebug("join " + shortSessionId(sessionId) + " name=" + name + " instrument=" + instrumentId);
+      return;
+    }
 
-  if (msg.checkAddrPattern("/session/leave") && msg.checkTypetag("s")) {
-    String sessionId = msg.get(0).stringValue();
-    bodiesBySession.remove(sessionId);
-    return;
-  }
+    if (msg.checkAddrPattern("/session/leave") && msg.checkTypetag("s")) {
+      String sessionId = msg.get(0).stringValue();
+      bodiesBySession.remove(sessionId);
+      logDebug("leave " + shortSessionId(sessionId));
+      return;
+    }
 
-  if (msg.checkAddrPattern("/session/position") && msg.checkTypetag("sff")) {
-    String sessionId = msg.get(0).stringValue();
-    float x = constrain(msg.get(1).floatValue(), -1, 1);
-    float y = constrain(msg.get(2).floatValue(), -1, 1);
-    receiveSessionPosition(sessionId, x, y);
-    return;
-  }
+    if (msg.checkAddrPattern("/session/position") && msg.checkTypetag("sff")) {
+      String sessionId = msg.get(0).stringValue();
+      float x = constrain(msg.get(1).floatValue(), -1, 1);
+      float y = constrain(msg.get(2).floatValue(), -1, 1);
+      receiveSessionPosition(sessionId, x, y);
+      logDebug("position " + shortSessionId(sessionId) + " osc=(" + nf(x, 0, 2) + "," + nf(y, 0, 2) + ")");
+      return;
+    }
 
-  if (msg.checkAddrPattern("/session/trigger") && msg.checkTypetag("ssi")) {
-    String sessionId = msg.get(0).stringValue();
-    String kind = msg.get(1).stringValue();
-    receiveSessionTrigger(sessionId, kind);
-    return;
-  }
+    if (msg.checkAddrPattern("/session/trigger") && msg.checkTypetag("ssi")) {
+      String sessionId = msg.get(0).stringValue();
+      String kind = msg.get(1).stringValue();
+      receiveSessionTrigger(sessionId, kind);
+      logDebug("trigger " + shortSessionId(sessionId) + " kind=" + kind);
+      return;
+    }
 
-  if (msg.checkAddrPattern("/session/pitch") && msg.checkTypetag("ssiff")) {
-    String sessionId = msg.get(0).stringValue();
-    String note = msg.get(1).stringValue();
-    int midi = msg.get(2).intValue();
-    float frequency = msg.get(3).floatValue();
-    float level = msg.get(4).floatValue();
-    receiveSessionPitch(sessionId, note, midi, frequency, level);
-    return;
-  }
+    if (msg.checkAddrPattern("/session/pitch") && msg.checkTypetag("ssiff")) {
+      String sessionId = msg.get(0).stringValue();
+      String note = msg.get(1).stringValue();
+      int midi = msg.get(2).intValue();
+      float frequency = msg.get(3).floatValue();
+      float level = msg.get(4).floatValue();
+      receiveSessionPitch(sessionId, note, midi, frequency, level);
+      logDebug("pitch " + shortSessionId(sessionId) + " " + note + " midi=" + midi + " hz=" + nf(frequency, 0, 1) + " level=" + nf(level, 0, 3));
+      return;
+    }
 
-  if (msg.checkAddrPattern("/input/position") && msg.checkTypetag("ff")) {
-    walkerX = constrain(msg.get(0).floatValue(), -1, 1);
-    walkerY = constrain(msg.get(1).floatValue(), -1, 1);
-    haveWalkerX = true;
-    haveWalkerY = true;
-    receiveSessionPosition("aggregate", walkerX, walkerY);
-    return;
-  }
+    if (msg.checkAddrPattern("/input/position") && msg.checkTypetag("ff")) {
+      walkerX = constrain(msg.get(0).floatValue(), -1, 1);
+      walkerY = constrain(msg.get(1).floatValue(), -1, 1);
+      haveWalkerX = true;
+      haveWalkerY = true;
+      logDebug("input position aggregate=(" + nf(walkerX, 0, 2) + "," + nf(walkerY, 0, 2) + ")");
+      return;
+    }
 
-  if (msg.checkAddrPattern("/input/trigger")) {
-    receiveSessionTrigger("aggregate", "trigger");
-    return;
-  }
+    if (msg.checkAddrPattern("/input/trigger")) {
+      receivePing();
+      logDebug("input trigger");
+      return;
+    }
 
-  if (msg.checkAddrPattern("/input/pitch") && msg.checkTypetag("siff")) {
-    String note = msg.get(0).stringValue();
-    int midi = msg.get(1).intValue();
-    float frequency = msg.get(2).floatValue();
-    float level = msg.get(3).floatValue();
-    receiveSessionPitch("aggregate", note, midi, frequency, level);
-    return;
-  }
+    if (msg.checkAddrPattern("/input/pitch") && msg.checkTypetag("siff")) {
+      String note = msg.get(0).stringValue();
+      int midi = msg.get(1).intValue();
+      float frequency = msg.get(2).floatValue();
+      float level = msg.get(3).floatValue();
+      for (Orbiter body : activeBodies()) {
+        applyPitch(body, note, midi, frequency, level);
+      }
+      logDebug("input pitch " + note + " midi=" + midi + " hz=" + nf(frequency, 0, 1) + " level=" + nf(level, 0, 3));
+      return;
+    }
 
-  if (msg.checkAddrPattern("/walker/signal/x") && msg.checkTypetag("f")) {
-    walkerX = constrain(msg.get(0).floatValue(), -1, 1);
-    haveWalkerX = true;
-    return;
-  }
+    if (msg.checkAddrPattern("/walker/signal/x") && msg.checkTypetag("f")) {
+      walkerX = constrain(msg.get(0).floatValue(), -1, 1);
+      haveWalkerX = true;
+      logDebug("walker x=" + nf(walkerX, 0, 2));
+      return;
+    }
 
-  if (msg.checkAddrPattern("/walker/signal/y") && msg.checkTypetag("f")) {
-    walkerY = constrain(msg.get(0).floatValue(), -1, 1);
-    haveWalkerY = true;
-    return;
-  }
+    if (msg.checkAddrPattern("/walker/signal/y") && msg.checkTypetag("f")) {
+      walkerY = constrain(msg.get(0).floatValue(), -1, 1);
+      haveWalkerY = true;
+      logDebug("walker y=" + nf(walkerY, 0, 2));
+      return;
+    }
 
-  if (msg.checkAddrPattern("/test/ping") || msg.checkAddrPattern("/event/ping")) {
-    receiveSessionTrigger("legacy", "ping");
+    if (msg.checkAddrPattern("/test/ping") || msg.checkAddrPattern("/event/ping")) {
+      receivePing();
+      logDebug("legacy ping");
+    }
   }
 }
 
@@ -361,10 +478,11 @@ void receiveSessionTrigger(String sessionId, String kind) {
 
 void receiveSessionPitch(String sessionId, String note, int midi, float frequency, float level) {
   Orbiter body = getOrCreateBody(sessionId, "", "");
-  body.lastNote = note;
-  body.lastFrequency = frequency;
-  body.hueBase = (midi % 12) * 30;
-  body.energy = max(body.energy, constrain(level * 8, 0.1, 1.0));
+  body.applyPitch(note, midi, frequency, level);
+}
+
+void applyPitch(Orbiter body, String note, int midi, float frequency, float level) {
+  body.applyPitch(note, midi, frequency, level);
 }
 
 Orbiter getOrCreateBody(String sessionId, String name, String instrumentId) {
@@ -387,6 +505,7 @@ Orbiter getOrCreateBody(String sessionId, String name, String instrumentId) {
   float radius = 0.16 + 0.035 * (index % 4);
   String label = (name == null || name.trim().length() == 0) ? shortSessionId(sessionId) : name.trim();
   body = new Orbiter(
+    nextOrbiterInstanceId++,
     sessionId,
     label,
     instrumentId == null ? "" : instrumentId,
@@ -396,6 +515,10 @@ Orbiter getOrCreateBody(String sessionId, String name, String instrumentId) {
     index
   );
   bodiesBySession.put(sessionId, body);
+  logDebug("created body #" + body.instanceId + " " + shortSessionId(sessionId)
+    + " label=" + body.label + " instrument=" + body.instrumentId
+    + " pos=(" + nf(body.x, 0, 2) + "," + nf(body.y, 0, 2) + ")"
+    + " target=(" + nf(body.targetX, 0, 2) + "," + nf(body.targetY, 0, 2) + ")");
   return body;
 }
 
@@ -404,24 +527,56 @@ String shortSessionId(String sessionId) {
 }
 
 void mousePressed() {
-  walkerX = map(mouseX, 0, width, -1, 1);
-  walkerY = map(mouseY, height, 0, -1, 1);
-  haveWalkerX = true;
-  haveWalkerY = true;
-  receiveSessionPosition("local", walkerX, walkerY);
-  receiveSessionTrigger("local", "mouse");
+  synchronized (stateLock) {
+    walkerX = map(mouseX, 0, width, -1, 1);
+    walkerY = map(mouseY, height, 0, -1, 1);
+    haveWalkerX = true;
+    haveWalkerY = true;
+    receiveSessionPosition("local", walkerX, walkerY);
+    receiveSessionTrigger("local", "mouse");
+  }
+}
+
+void keyPressed() {
+  if (key == 'f' || key == 'F') {
+    synchronized (stateLock) {
+      physicsFrozen = !physicsFrozen;
+      logDebug("physics " + (physicsFrozen ? "frozen" : "live"));
+    }
+  }
+}
+
+void logDebug(String message) {
+  if (!DEBUG_LOGGING) {
+    return;
+  }
+  debugMessageCount++;
+  if (debugMessageCount <= DEBUG_MESSAGE_LIMIT) {
+    println("[gravity-orbit] " + message);
+  } else if (debugMessageCount == DEBUG_MESSAGE_LIMIT + 1) {
+    println("[gravity-orbit] debug message limit reached; suppressing further logs");
+  }
 }
 
 class Orbiter {
+  int instanceId;
   String sessionId;
   String label;
   String instrumentId;
   String lastNote = "";
   float lastFrequency = 0;
+  float lastPitchLevel = 0;
+  int lastPitchMidi = 0;
+  int lastPitchMillis = 0;
+  float pitchOffsetY = 0;
   float x;
   float y;
   float targetX;
   float targetY;
+  float preX;
+  float preY;
+  float postX;
+  float postY;
   float vx;
   float vy;
   float hueBase;
@@ -430,8 +585,10 @@ class Orbiter {
   float energy;
   float phaseOffset;
   float orbitDirection;
+  int lastUpdateFrame;
 
-  Orbiter(String sessionId, String label, String instrumentId, float x, float y, float hueBase, int index) {
+  Orbiter(int instanceId, String sessionId, String label, String instrumentId, float x, float y, float hueBase, int index) {
+    this.instanceId = instanceId;
     this.sessionId = sessionId;
     this.label = label;
     this.instrumentId = instrumentId;
@@ -453,6 +610,64 @@ class Orbiter {
     return (radiusPixels() * 0.5 + 5) / min(width, height);
   }
 
+  float pitchOffsetForMidi(int midi) {
+    int clampedMidi = constrain(midi, pitchRangeMinMidi, pitchRangeMaxMidi);
+    return map(clampedMidi, pitchRangeMinMidi, pitchRangeMaxMidi, PITCH_VERTICAL_SPAN, -PITCH_VERTICAL_SPAN);
+  }
+
+  float effectiveTargetY() {
+    return constrain(targetY + pitchOffsetY, radiusNormalized(), 1 - radiusNormalized());
+  }
+
+  boolean isPitchFresh() {
+    return lastPitchMillis > 0 && millis() - lastPitchMillis <= PITCH_DISPLAY_HOLD_MS;
+  }
+
+  String labelForDebug() {
+    return label;
+  }
+
+  String debugState() {
+    return "inst=" + instanceId
+      + " x=" + nf(x, 0, 3)
+      + " y=" + nf(y, 0, 3)
+      + " tx=" + nf(targetX, 0, 3)
+      + " ty=" + nf(targetY, 0, 3)
+      + " pY=" + nf(pitchOffsetY, 0, 3)
+      + " note=" + debugNote();
+  }
+
+  String debugNote() {
+    return isPitchFresh() ? lastNote : "-";
+  }
+
+  String pitchDisplayLabel() {
+    if (isPitchFresh()) {
+      return lastNote.length() == 0 ? label : lastNote;
+    }
+    return label;
+  }
+
+  void applyPitch(String note, int midi, float frequency, float level) {
+    lastNote = note == null ? "" : note.trim();
+    lastFrequency = frequency;
+    lastPitchLevel = level;
+    lastPitchMidi = midi;
+    lastPitchMillis = millis();
+    pitchOffsetY = pitchOffsetForMidi(midi);
+    hueBase = (midi % 12) * 30;
+    energy = max(energy, constrain(level * 8, 0.1, 1.0));
+  }
+
+  void updatePitchState() {
+    if (!isPitchFresh()) {
+      pitchOffsetY = lerp(pitchOffsetY, 0, 0.08);
+      if (abs(pitchOffsetY) < 0.0005) {
+        pitchOffsetY = 0;
+      }
+    }
+  }
+
   void draw() {
     hueVelocity = lerp(hueVelocity, 0, 0.07);
     hueCurrent = (hueBase + hueVelocity + 360) % 360;
@@ -460,22 +675,20 @@ class Orbiter {
     float r = radiusPixels();
     float px = x * width;
     float py = y * height;
+    float targetDisplayY = effectiveTargetY() * height;
 
-    noStroke();
-    fill(hueCurrent, 65 + speed * 25, 85 + energy * 15, 18);
-    ellipse(px, py, r * 2.0, r * 2.0);
+    stroke(hueCurrent, 45, 95, 70);
+    strokeWeight(2);
     fill(hueCurrent, 72 + speed * 20, 92 + energy * 8, 88);
-    ellipse(px, py, r, r);
-    fill((hueCurrent + 35) % 360, 35, 100, 72);
-    ellipse(px - r * 0.16, py - r * 0.18, r * 0.32, r * 0.32);
+    ellipse(px, py, r * 2.0, r * 2.0);
 
     stroke(hueCurrent, 45, 95, 44);
     strokeWeight(1);
-    line(px, py, targetX * width, targetY * height);
+    line(px, py, targetX * width, targetDisplayY);
     fill(0, 0, 95, 72);
-    textAlign(CENTER, TOP);
+    textAlign(CENTER, CENTER);
     textSize(12);
-    String displayLabel = lastNote.length() == 0 ? label : label + "  " + lastNote;
-    text(displayLabel, px, py + r * 0.62);
+    String labelToDraw = pitchDisplayLabel();
+    text(labelToDraw, px, py);
   }
 }

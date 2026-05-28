@@ -218,8 +218,8 @@ public class GravityOrbitGradientSketch extends PApplet {
                     initializeUser(sessionId);
                 }
                 float[] targetPos = userTargetPositions.get(sessionId);
-                targetPos[0] = event.x();
-                targetPos[1] = event.y();
+                targetPos[0] = TouchNormalization.fromSignedRange(event.x());
+                targetPos[1] = TouchNormalization.fromSignedRange(event.y());
             }
             case "slider" -> {
                 if (!userPositions.containsKey(sessionId)) {

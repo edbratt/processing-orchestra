@@ -95,8 +95,8 @@ public class AbandonedArt90Sketch extends PApplet {
 
     private void handleTouchEvent(String sessionId, UserInputEvent event) {
         UserState state = users.computeIfAbsent(sessionId, this::createUserState);
-        state.targetX = constrain(event.x(), 0.08f, 0.92f);
-        state.targetY = constrain(event.y(), 0.12f, 0.88f);
+        state.targetX = constrain(TouchNormalization.fromSignedRange(event.x()), 0.08f, 0.92f);
+        state.targetY = constrain(TouchNormalization.fromSignedRange(event.y()), 0.12f, 0.88f);
         state.lastInputMillis = millis();
     }
 

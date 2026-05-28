@@ -11,6 +11,7 @@ Contents currently include:
 
 V2 references:
 - [V2 OSC Instrument Plan](V2_OSC_INSTRUMENT_PLAN.md)
+- [OSC Event Reference](OSC_EVENT_REFERENCE.md)
 - [V2 OSC Backlog](V2_OSC_BACKLOG.md)
 - [V2 Single-Note Pitch Plan](V2_SINGLE_NOTE_PITCH_PLAN.md)
 

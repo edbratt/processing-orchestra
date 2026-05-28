@@ -94,6 +94,14 @@ public class InputService implements HttpService {
     private void removeSession(ServerRequest req, ServerResponse res) {
         String sessionId = req.path().pathParameters().get("id");
         if (sessionId != null && sessionManager.isActive(sessionId)) {
+            SessionManager.SessionInfo session = sessionManager.getSession(sessionId);
+            if (session != null) {
+                System.out.println("Session removed via REST: "
+                    + sessionId.substring(0, Math.min(8, sessionId.length()))
+                    + " name=\"" + (session.name() == null || session.name().isBlank() ? "<blank>" : session.name()) + "\""
+                    + " instrument=\"" + (session.instrumentId() == null || session.instrumentId().isBlank() ? "<blank>" : session.instrumentId()) + "\""
+                    + " stream=\"" + (session.streamId() == null || session.streamId().isBlank() ? "<default>" : session.streamId()) + "\"");
+            }
             sessionManager.removeSession(sessionId);
             if (audioBuffer != null) {
                 audioBuffer.clearSession(sessionId);

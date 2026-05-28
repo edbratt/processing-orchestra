@@ -151,6 +151,8 @@ Current OSC contracts:
   - `/session/trigger` string sessionId, string kind, int count
   - `/session/pitch` string sessionId, string note, int midiNote, float frequencyHz, float level
 
+The canonical contract reference, including browser event classes and trigger kinds, lives in [OSC Event Reference](OSC_EVENT_REFERENCE.md).
+
 Enable OSC success logging with:
 
 ```powershell

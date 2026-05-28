@@ -19,7 +19,7 @@ Implemented on `v2-osc-instruments`:
 - OSC send logging can be enabled with `-Dosc.debug.logging=true`.
 - `orchestra-input-v1` streams emit general `/input/position` and `/input/trigger` messages.
 - `orchestra-session-v1` streams emit per-session join, leave, position, and trigger messages.
-- Audio-capable instruments emit pitch-class events derived from dominant frequency analysis.
+- Audio-capable instruments emit pitch-class events derived from stable monophonic pitch detection.
 
 ## Clap / Ping Detection
 
@@ -31,8 +31,8 @@ Implemented on `v2-osc-instruments`:
 - [ ] Add browser controls for audio clap sensitivity.
 - [x] Add OSC pitch-class events derived from browser audio.
 - [ ] Add browser controls for pitch detection sensitivity and minimum level.
-- [ ] Add smoother pitch tracking for singing and sustained instruments.
-- [ ] Implement the single-note live instrument plan in [V2 Single-Note Pitch Plan](V2_SINGLE_NOTE_PITCH_PLAN.md).
+- [x] Add smoother pitch tracking for singing and sustained instruments.
+- [x] Implement the single-note live instrument plan in [V2 Single-Note Pitch Plan](V2_SINGLE_NOTE_PITCH_PLAN.md).
 - [ ] Track short-term noise floor per session so quiet rooms and noisy rooms behave differently.
 - [ ] Detect onset using a rising-edge energy delta instead of only absolute peak amplitude.
 - [ ] Add a short refractory window after each ping to reduce double triggers.
@@ -102,6 +102,7 @@ Implemented on `v2-osc-instruments`:
   - `orchestra-session-v1`
   - future capability contracts
 - [ ] Document expected OSC addresses, argument types, ranges, and timing.
+- [ ] Keep the canonical event reference in sync with [OSC Event Reference](OSC_EVENT_REFERENCE.md).
 - [ ] Add sample performer startup notes for Lee's sketches.
 - [ ] Add a receiver test sketch that prints every OSC message for a stream.
 - [ ] Add versioning for OSC contracts so performer sketches can reject unsupported messages.

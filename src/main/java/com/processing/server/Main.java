@@ -44,6 +44,7 @@ public final class Main {
         SessionManager sessionManager = new SessionManager(oscOutputConfig.defaultStreamId());
 
         AudioConfig audioConfig = loadAudioConfig(config);
+        PitchConfig pitchConfig = loadPitchConfig(config, startsOsc(outputMode));
         MotionConfig motionConfig = loadMotionConfig(config);
         AudioBuffer audioBuffer = new AudioBuffer(
             config.get("audio.max-buffer-chunks").asInt().orElse(100),
@@ -67,7 +68,7 @@ public final class Main {
         }
         ScheduledExecutorService sessionReaper = startSessionReaper(sessionManager, eventQueue, audioBuffer, debugConfig);
         OscRuntime oscRuntime = startsOsc(outputMode)
-            ? startOscRuntime(eventQueue, sessionManager, audioBuffer, audioConfig, oscOutputConfig)
+            ? startOscRuntime(eventQueue, sessionManager, audioBuffer, audioConfig, pitchConfig, oscOutputConfig)
             : OscRuntime.disabled();
 
         InputService inputService = new InputService(
@@ -113,6 +114,10 @@ public final class Main {
         System.out.println("Audio config: " + audioConfig.getSampleRate() + "Hz, "
                 + audioConfig.getChannels() + " channel(s), buffer "
                 + audioConfig.getBufferSize() + " samples - " + audioConfig.getDescription());
+        System.out.println("Pitch config: " + pitchConfig.detector() + ", level>=" + pitchConfig.minLevel()
+                + ", confidence>=" + pitchConfig.minConfidence()
+                + ", range " + pitchConfig.minFrequencyHz() + "-" + pitchConfig.maxFrequencyHz()
+                + "Hz, emit interval " + pitchConfig.emitIntervalMs() + "ms");
         System.out.println("Motion config: " + motionConfig.getUpdateHz() + "Hz, clamp beta "
                 + motionConfig.getBetaClampDegrees() + "°, gamma "
                 + motionConfig.getGammaClampDegrees() + "°, magnitude "
@@ -166,6 +171,22 @@ public final class Main {
             config.get("motion.mapping.shake-burst-scale").asDouble().orElse(1.8).floatValue(),
             config.get("motion.debug.logging").asBoolean().orElse(false),
             config.get("motion.debug.sample-limit").asInt().orElse(5)
+        );
+    }
+
+    private static PitchConfig loadPitchConfig(Config config, boolean enabledByDefault) {
+        String basePath = "osc.pitch.";
+        return new PitchConfig(
+            config.get(basePath + "enabled").asBoolean().orElse(enabledByDefault),
+            config.get(basePath + "detector").asString().orElse("yin"),
+            config.get(basePath + "min-level").asDouble().orElse(0.035).floatValue(),
+            config.get(basePath + "min-confidence").asDouble().orElse(0.18).floatValue(),
+            config.get(basePath + "min-frequency-hz").asDouble().orElse(65.0).floatValue(),
+            config.get(basePath + "max-frequency-hz").asDouble().orElse(1600.0).floatValue(),
+            config.get(basePath + "yin-threshold").asDouble().orElse(0.12).floatValue(),
+            config.get(basePath + "emit-interval-ms").asInt().orElse(250),
+            config.get(basePath + "note-switch-streak").asInt().orElse(2),
+            config.get(basePath + "smoothing-alpha").asDouble().orElse(0.35).floatValue()
         );
     }
 
@@ -245,6 +266,7 @@ public final class Main {
                                               SessionManager sessionManager,
                                               AudioBuffer audioBuffer,
                                               AudioConfig audioConfig,
+                                              PitchConfig pitchConfig,
                                               OscOutputConfig config) {
         OscOutputService oscOutputService = new OscOutputService(config);
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -253,7 +275,14 @@ public final class Main {
             return thread;
         });
         executor.scheduleAtFixedRate(
-            new OscEventPump(eventQueue, sessionManager, audioBuffer, audioConfig, oscOutputService, config.defaultStreamId()),
+            new OscEventPump(
+                eventQueue,
+                sessionManager,
+                audioBuffer,
+                audioConfig,
+                pitchConfig,
+                oscOutputService,
+                config.defaultStreamId()),
             0,
             Math.max(1, 1000 / config.fps()),
             TimeUnit.MILLISECONDS);
@@ -326,14 +355,18 @@ public final class Main {
                                             DebugConfig debugConfig) {
         long now = System.currentTimeMillis();
         for (SessionManager.SessionInfo session : sessionManager.findExpiredSessions(SESSION_STALE_AFTER_MILLIS, now).values()) {
+            String sessionSummary = session.sessionId().substring(0, Math.min(8, session.sessionId().length()))
+                + " name=\"" + (session.name() == null || session.name().isBlank() ? "<blank>" : session.name()) + "\""
+                + " instrument=\"" + (session.instrumentId() == null || session.instrumentId().isBlank() ? "<blank>" : session.instrumentId()) + "\""
+                + " stream=\"" + (session.streamId() == null || session.streamId().isBlank() ? "<default>" : session.streamId()) + "\"";
             sessionManager.removeSession(session.sessionId());
             audioBuffer.clearSession(session.sessionId());
             eventQueue.push(new UserInputEvent(session.sessionId(), "session-ended", "", "", now));
             if (debugConfig.isLogging()) {
-                System.out.println("Reaped stale session: " + session.sessionId().substring(0, 8)
+                System.out.println("Reaped stale session: " + sessionSummary
                     + " lastSeenAt=" + session.lastSeenAt()
                     + " ageMs=" + (now - session.lastSeenAt()));
-                System.out.println("Stale session cleanup completed for " + session.sessionId().substring(0, 8)
+                System.out.println("Stale session cleanup completed for " + sessionSummary
                     + " (event queued, session removed, audio cleared)");
             }
         }

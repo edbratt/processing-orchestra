@@ -79,8 +79,8 @@ public class StarterSketch extends PApplet {
             }
 
             if ("touch".equals(event.eventType())) {
-                markerX = constrain(event.x(), 0.05f, 0.95f);
-                markerY = constrain(event.y(), 0.1f, 0.9f);
+                markerX = constrain(TouchNormalization.fromSignedRange(event.x()), 0.05f, 0.95f);
+                markerY = constrain(TouchNormalization.fromSignedRange(event.y()), 0.1f, 0.9f);
             } else if ("slider".equals(event.eventType()) && "sizeSlider".equals(event.controlId())) {
                 markerSize = map(constrain(event.value(), 0f, 1f), 0f, 1f, 20f, 120f);
             } else if ("key".equals(event.eventType()) && "pressed".equals(event.keyAction())) {

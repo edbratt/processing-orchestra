@@ -17,15 +17,13 @@ public final class OscEventPump implements Runnable {
     private static final float MOTION_GAMMA_CLAMP_DEGREES = 60f;
     private static final float MOTION_SHAKE_THRESHOLD_G = 1.2f;
     private static final int MOTION_SHAKE_DEBOUNCE_MS = 350;
-    private static final int PITCH_EMIT_INTERVAL_MS = 250;
-    private static final String[] NOTE_NAMES = {
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
-    };
 
     private final EventQueue eventQueue;
     private final SessionManager sessionManager;
     private final AudioBuffer audioBuffer;
     private final AudioConfig audioConfig;
+    private final PitchConfig pitchConfig;
+    private final PitchDetector pitchDetector;
     private final OscOutputService oscOutputService;
     private final String defaultStreamId;
     private final Map<String, WalkerState> walkerStatesBySession = new HashMap<>();
@@ -35,18 +33,21 @@ public final class OscEventPump implements Runnable {
     private final Map<String, Float> lastMotionMagnitudeBySession = new HashMap<>();
     private final Map<String, MotionControlState> motionControlsBySession = new HashMap<>();
     private final Map<String, SessionSnapshot> joinedSessionsBySession = new HashMap<>();
-    private final Map<String, PitchState> pitchStatesBySession = new HashMap<>();
+    private final Map<String, PitchTracker> pitchStatesBySession = new HashMap<>();
 
     public OscEventPump(EventQueue eventQueue,
                         SessionManager sessionManager,
                         AudioBuffer audioBuffer,
                         AudioConfig audioConfig,
+                        PitchConfig pitchConfig,
                         OscOutputService oscOutputService,
                         String defaultStreamId) {
         this.eventQueue = eventQueue;
         this.sessionManager = sessionManager;
         this.audioBuffer = audioBuffer;
         this.audioConfig = audioConfig;
+        this.pitchConfig = pitchConfig;
+        this.pitchDetector = PitchDetectors.create(pitchConfig);
         this.oscOutputService = oscOutputService;
         this.defaultStreamId = defaultStreamId;
     }
@@ -118,8 +119,8 @@ public final class OscEventPump implements Runnable {
     }
 
     private void updateWalker(UserInputEvent event, String streamId, Map<String, StreamFrame> framesByStream) {
-        float x = clamp(event.x(), 0f, 1f) * 2f - 1f;
-        float y = 1f - clamp(event.y(), 0f, 1f) * 2f;
+        float x = clamp(TouchNormalization.fromSignedRange(event.x()), 0f, 1f) * 2f - 1f;
+        float y = 1f - clamp(TouchNormalization.fromSignedRange(event.y()), 0f, 1f) * 2f;
         updateWalkerState(event.sessionId(), streamId, framesByStream, x, y);
     }
 
@@ -238,37 +239,17 @@ public final class OscEventPump implements Runnable {
     }
 
     private void processPitch(String sessionId, String streamId, byte[] chunk, long now) {
-        PitchState state = pitchStatesBySession.computeIfAbsent(sessionId, ignored -> new PitchState());
-        AudioFeatureAnalyzer.AudioAnalysisResult analysis = AudioFeatureAnalyzer.analyze(
-            chunk,
-            audioConfig.getChannels(),
-            audioConfig.getSampleRate(),
-            1f,
-            state.previousFrequencyHz
-        );
-        state.previousFrequencyHz = analysis.dominantFrequency();
-        Pitch pitch = pitchFromFrequency(analysis.dominantFrequency());
-        if (pitch == null || analysis.level() < AudioFeatureAnalyzer.MIN_DETECTION_LEVEL) {
+        if (!pitchConfig.enabled()) {
             return;
         }
-        boolean changed = pitch.midiNote() != state.lastMidiNote;
-        boolean due = now - state.lastEmittedAtMs >= PITCH_EMIT_INTERVAL_MS;
-        if (!changed && !due) {
+        PitchTracker tracker = pitchStatesBySession.computeIfAbsent(sessionId, ignored -> new PitchTracker());
+        PitchDetectionResult detection = pitchDetector.detect(chunk, audioConfig.getChannels(), audioConfig.getSampleRate());
+        PitchEmission emission = tracker.update(detection, pitchConfig, now);
+        if (emission == null) {
             return;
         }
-        state.lastMidiNote = pitch.midiNote();
-        state.lastEmittedAtMs = now;
-        oscOutputService.sendPitch(streamId, pitch.note(), pitch.midiNote(), pitch.frequencyHz(), analysis.level());
-        oscOutputService.sendSessionPitch(streamId, sessionId, pitch.note(), pitch.midiNote(), pitch.frequencyHz(), analysis.level());
-    }
-
-    private Pitch pitchFromFrequency(float frequencyHz) {
-        if (frequencyHz <= 0f) {
-            return null;
-        }
-        int midi = Math.round(69f + 12f * (float) (Math.log(frequencyHz / 440f) / Math.log(2)));
-        int noteIndex = Math.floorMod(midi, NOTE_NAMES.length);
-        return new Pitch(NOTE_NAMES[noteIndex], midi, frequencyHz);
+        oscOutputService.sendPitch(streamId, emission.note(), emission.midiNote(), emission.frequencyHz(), emission.level());
+        oscOutputService.sendSessionPitch(streamId, sessionId, emission.note(), emission.midiNote(), emission.frequencyHz(), emission.level());
     }
 
     private void sendAggregatedWalker(String streamId) {
@@ -381,9 +362,6 @@ public final class OscEventPump implements Runnable {
     private record SessionSnapshot(String streamId, String name, String instrumentId) {
     }
 
-    private record Pitch(String note, int midiNote, float frequencyHz) {
-    }
-
     private static final class ClapState {
         private boolean inClap;
         private float currentPeak;
@@ -398,9 +376,4 @@ public final class OscEventPump implements Runnable {
         private float shakeThreshold = MOTION_SHAKE_THRESHOLD_G;
     }
 
-    private static final class PitchState {
-        private float previousFrequencyHz;
-        private int lastMidiNote = Integer.MIN_VALUE;
-        private long lastEmittedAtMs;
-    }
 }

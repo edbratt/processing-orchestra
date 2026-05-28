@@ -99,8 +99,8 @@ public class AbandonedArt96 extends PApplet {
 
     private void handleTouchEvent(String sessionId, UserInputEvent event) {
         UserState state = users.computeIfAbsent(sessionId, this::createUserState);
-        float clampedX = constrain(event.x(), MIN_TOUCH_MARGIN_X, MAX_TOUCH_MARGIN_X);
-        float clampedY = constrain(event.y(), MIN_TOUCH_MARGIN_Y, MAX_TOUCH_MARGIN_Y);
+        float clampedX = constrain(TouchNormalization.fromSignedRange(event.x()), MIN_TOUCH_MARGIN_X, MAX_TOUCH_MARGIN_X);
+        float clampedY = constrain(TouchNormalization.fromSignedRange(event.y()), MIN_TOUCH_MARGIN_Y, MAX_TOUCH_MARGIN_Y);
         float dx = clampedX - state.touchX;
         float dy = clampedY - state.touchY;
 

@@ -31,12 +31,11 @@ Out of scope for this first pass:
 
 ## Recommended Detector
 
-Start with TarsosDSP because it is Java-native and avoids native-library installation.
+This branch now uses a Java-native YIN-style detector behind a `PitchDetector` abstraction. That keeps the runtime self-contained while still leaving room to swap in TarsosDSP later if we want the library-specific implementations.
 
 Candidate algorithms:
 
 - `YIN`: good general-purpose monophonic pitch detection.
-- `McLeodPitchMethod`: often useful for live instruments with strong harmonics.
 - Existing simple autocorrelation: keep as fallback and for comparison.
 
 Recommended initial default:
@@ -45,7 +44,7 @@ Recommended initial default:
 osc:
   pitch:
     enabled: true
-    detector: "tarsos-yin"
+    detector: "yin"
     min-level: 0.035
     emit-interval-ms: 250
     min-frequency-hz: 65
@@ -124,10 +123,9 @@ interface PitchDetector {
    - Wrap `AudioFeatureAnalyzer` behind the new interface.
    - Name it `simple-autocorrelation`.
 
-4. Add TarsosDSP dependency.
-   - Add Maven dependency.
-   - Implement `tarsos-yin`.
-   - Implement `tarsos-mpm` if the API makes it straightforward.
+4. Keep the detector swappable.
+   - The current implementation uses a Java-native YIN detector.
+   - If we later add TarsosDSP, wire it in behind the same interface and keep the existing fallback.
 
 5. Add note conversion utility.
    - Frequency to nearest MIDI note.

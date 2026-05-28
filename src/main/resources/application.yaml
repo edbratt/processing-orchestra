@@ -28,6 +28,17 @@ osc:
   debug:
     logging: false
     sample-limit: 100
+  pitch:
+    enabled: true
+    detector: "yin"
+    min-level: 0.035
+    min-confidence: 0.18
+    min-frequency-hz: 65
+    max-frequency-hz: 1600
+    yin-threshold: 0.12
+    emit-interval-ms: 250
+    note-switch-streak: 2
+    smoothing-alpha: 0.35
   stream:
     spiral-main:
       host: "127.0.0.1"

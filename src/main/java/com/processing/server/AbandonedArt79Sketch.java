@@ -98,8 +98,8 @@ public class AbandonedArt79Sketch extends PApplet {
 
     private void handleTouchEvent(String sessionId, UserInputEvent event) {
         UserState state = users.computeIfAbsent(sessionId, this::createUserState);
-        float nextX = constrain(event.x(), 0.08f, 0.92f);
-        float nextY = constrain(event.y(), 0.08f, 0.92f);
+        float nextX = constrain(TouchNormalization.fromSignedRange(event.x()), 0.08f, 0.92f);
+        float nextY = constrain(TouchNormalization.fromSignedRange(event.y()), 0.08f, 0.92f);
         float dx = nextX - state.touchX;
         float dy = nextY - state.touchY;
 
