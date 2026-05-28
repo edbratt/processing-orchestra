@@ -14,6 +14,35 @@ processing:
   height: 600
   fps: 60
 
+output:
+  mode: "sketch"
+
+osc:
+  default-stream: "spiral-main"
+  streams: "spiral-main,gravity-orbit,vectorscope"
+  host: "127.0.0.1"
+  walker-port: 12000
+  vectorscope-port: 12001
+  mirror-vectorscope: true
+  fps: 60
+  debug:
+    logging: false
+    sample-limit: 100
+  stream:
+    spiral-main:
+      host: "127.0.0.1"
+      port: 12000
+      contract: "walker-trigger"
+    gravity-orbit:
+      host: "127.0.0.1"
+      port: 12002
+      contract: "orchestra-session-v1"
+    vectorscope:
+      host: "127.0.0.1"
+      port: 12001
+      contract: "walker-monitor"
+      mirror-source: "spiral-main"
+
 audio:
   mode: "high-quality-mono"
   debug:

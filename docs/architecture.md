@@ -2,11 +2,14 @@
 
 ## Overview
 
-This application is a multi-user web controller for a Processing sketch running on the server machine. Browser clients connect to a Helidon application, interact with touch areas, sliders, and buttons, optionally stream microphone audio, and the server combines those inputs into one shared Processing canvas.
+This application is a multi-user web controller for Processing-based performance. Browser clients connect to a Helidon application, choose an instrument, interact with touch areas, sliders, buttons, keyboard, microphone audio, or phone motion, and send those inputs to the server.
+
+The original runtime mode combines all browser input into one Processing sketch running inside the server process. The v2 OSC branch also supports an OSC-only mode where the server does not open a local graphics sketch. Instead, it interprets browser instrumentalist input, maps sessions into named OSC streams, and sends those streams to one or more graphical performer sketches listening on UDP ports.
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [V2 OSC Performance Flow](#v2-osc-performance-flow)
 - [Architecture Diagram](#architecture-diagram)
 - [Multi-User Session Lifecycle](#multi-user-session-lifecycle)
 - [Data Flow](#data-flow)
@@ -19,9 +22,66 @@ This application is a multi-user web controller for a Processing sketch running 
 - [Running the Application](#running-the-application)
 - [File Structure](#file-structure)
 
+## V2 OSC Performance Flow
+
+V2 separates the people playing controls from the sketches producing graphics:
+
+- Browser instrumentalist: a user session running a selected JavaScript instrument, such as `touch-walker`, `audio-clap`, `tilt-walker`, `shake-ping`, `motion-orchestra`, or `full-orchestra`.
+- Web server: the Helidon/Java process that owns sessions, receives WebSocket control/audio/motion data, processes each session independently, aggregates compatible input by OSC stream, and emits OSC messages.
+- OSC stream: a named output bus with a target host, UDP port, and message contract. Each session maps to at most one primary stream, while multiple sessions may feed the same stream.
+- Graphical performer sketch: a Processing sketch or other OSC receiver that listens on a configured port and reacts to messages such as walker coordinates or ping events.
+
+```mermaid
+flowchart LR
+    subgraph Players["Browser Client Instrumentalists"]
+        PlayerA["Session A<br/>name + instrument + stream"]
+        PlayerB["Session B<br/>name + instrument + stream"]
+        PlayerN["Session N<br/>name + instrument + stream"]
+    end
+
+    subgraph Web["Processing Server Web Layer"]
+        UI["index.html<br/>instrument selector<br/>stream selector"]
+        WS["WebSocket /ws<br/>JSON controls + binary audio"]
+        Sessions["SessionManager<br/>name, instrument, stream"]
+        Queue["EventQueue<br/>touch, buttons, keyboard, motion"]
+        Audio["AudioBuffer<br/>per-session PCM"]
+        Pump["OscEventPump<br/>per-session processors<br/>stream aggregation"]
+        Output["OscOutputService<br/>UDP OSC messages"]
+    end
+
+    subgraph Performers["Graphical Performer Sketches"]
+        Spiral["spiral_walker<br/>port 12000"]
+        Gravity["gravity_orbit_v2<br/>port 12002"]
+        Lissajous["lissajous_display<br/>port 12001"]
+        Other["other performer<br/>custom port"]
+    end
+
+    PlayerA --> UI
+    PlayerB --> UI
+    PlayerN --> UI
+    UI --> WS
+    WS --> Sessions
+    WS --> Queue
+    WS --> Audio
+    Sessions --> Pump
+    Queue --> Pump
+    Audio --> Pump
+    Pump --> Output
+    Output -->|"spiral-main OSC stream"| Spiral
+    Output -->|"gravity-orbit OSC stream"| Gravity
+    Output -->|"vectorscope OSC stream"| Lissajous
+    Output -->|"additional configured streams"| Other
+```
+
+In `output.mode=osc`, `Main` starts the web server and OSC event pump, but skips the in-process Processing graphics window. In the legacy `output.mode=sketch` path, browser input still flows into the server-side `ProcessingSketch`.
+
+The prototype stream configuration lives under `osc.*` in `src/main/resources/application.yaml`. The browser receives the known instrument and stream list from `/api/orchestra`, and selected values are acknowledged over the WebSocket session. More detail is tracked in [V2 OSC Instrument Plan](work-in-progress/V2_OSC_INSTRUMENT_PLAN.md).
+
+---
+
 ## Architecture Diagram
 
-This diagram shows the major runtime components and their structural relationships.
+This diagram shows the major runtime components and their structural relationships, including both the original sketch mode and the v2 OSC-only mode.
 
 ```mermaid
 flowchart LR
@@ -51,6 +111,8 @@ flowchart LR
         Queue["EventQueue"]
         AudioBuffer["AudioBuffer"]
         Sketch["ProcessingSketch<br/>shared canvas +<br/>audio-reactive visuals"]
+        OscPump["OscEventPump<br/>OSC-only processing loop"]
+        OscOutput["OscOutputService<br/>UDP performer streams"]
         API --> Sessions
         API --> Queue
         WSH --> Sessions
@@ -59,6 +121,14 @@ flowchart LR
         Queue --> Sketch
         AudioBuffer --> Sketch
         Sessions --> Sketch
+        Queue --> OscPump
+        AudioBuffer --> OscPump
+        Sessions --> OscPump
+        OscPump --> OscOutput
+    end
+
+    subgraph Performers["External Performer Sketches"]
+        Performer["Processing OSC listener<br/>graphical output"]
     end
 
     Touch --> ControlStream
@@ -68,14 +138,17 @@ flowchart LR
     Audio --> AudioStream
     ControlStream --> WSH
     AudioStream --> WSH
+    OscOutput --> Performer
 ```
 
 Key details:
 - The browser UI is served from `index.html`, then shaped by the active sketch's controller profile from `/api/controller`.
+- The v2 browser UI also fetches `/api/orchestra` so users can choose their instrument and OSC stream.
 - `ControllerConfig` maps the configured `processing.sketch-class` to the browser controls that sketch actually uses, such as touch, sliders, buttons, keyboard, audio, or motion.
 - The browser uses one `/ws` connection, but that channel carries two logical streams in parallel: JSON control messages and binary audio frames.
 - `WebSocketHandler` separates those streams and forwards them to the correct server-side structures.
 - `ProcessingSketch` consumes the shared session, event, and audio state and renders the combined visual result.
+- In OSC mode, `OscEventPump` consumes the same session, event, and audio state and sends OSC events to external performer sketches instead of drawing locally.
 
 ---
 
@@ -92,20 +165,20 @@ flowchart LR
     end
 
     subgraph Browser["Per-User Browser App"]
-        Static["Static `index.html` + JavaScript<br/>served by Helidon"]
+        Static["Static index.html + JavaScript<br/>served by Helidon"]
         Controls["Controls:<br/>buttons, sliders, keyboard"]
         Streams["Optional live streams:<br/>motion + microphone audio"]
-        Lifecycle["Lifecycle:<br/>open `http://localhost:8080`<br/>grant permissions if needed<br/>interact<br/>close page"]
+        Lifecycle["Lifecycle:<br/>open browser URL<br/>grant permissions if needed<br/>interact<br/>close page"]
         Static --> Controls
         Static --> Streams
         Static --> Lifecycle
     end
 
     subgraph Server["Helidon Server"]
-        WSH["`WebSocketHandler`<br/>one live socket per browser"]
-        Sessions["`SessionManager`<br/>session A | session B | session N"]
-        Queue["`EventQueue`<br/>ordered control events per session"]
-        Audio["`AudioBuffer`<br/>continuous audio chunks per session"]
+        WSH["WebSocketHandler<br/>one live socket per browser"]
+        Sessions["SessionManager<br/>session A | session B | session N"]
+        Queue["EventQueue<br/>ordered control events per session"]
+        Audio["AudioBuffer<br/>continuous audio chunks per session"]
         WSH --> Sessions
         WSH --> Queue
         WSH --> Audio
@@ -113,8 +186,8 @@ flowchart LR
 
     subgraph Sketch["One Processing Sketch"]
         Init["Initialize sketch once at startup"]
-        Draw["Each `draw()` iteration:<br/>drain queued events<br/>poll audio for all active sessions<br/>initialize missing sketch-side user state<br/>update per-session maps<br/>optionally combine session data<br/>render one shared sketch"]
-        Remove["On `session-ended`:<br/>remove that user's sketch-side state"]
+        Draw["Each draw() iteration:<br/>drain queued events<br/>poll audio for all active sessions<br/>initialize missing sketch-side user state<br/>update per-session maps<br/>optionally combine session data<br/>render one shared sketch"]
+        Remove["On session-ended:<br/>remove that user's sketch-side state"]
         Init --> Draw
         Draw --> Remove
     end
@@ -128,7 +201,7 @@ flowchart LR
     Queue --> Draw
     Audio --> Draw
     Lifecycle -->|"page closes"| WSH
-    WSH -->|"cleanup: remove session, clear audio, queue `session-ended`"| Remove
+    WSH -->|"cleanup: remove session, clear audio, queue session-ended"| Remove
 ```
 
 Key details:

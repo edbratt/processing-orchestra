@@ -53,6 +53,8 @@ public class WebSocketHandler implements WsListener {
             .set("type", "session")
             .set("sessionId", sessionId)
             .set("name", sessionInfo != null ? sessionInfo.name() : "")
+            .set("instrumentId", sessionInfo != null ? sessionInfo.instrumentId() : "")
+            .set("streamId", sessionInfo != null ? sessionInfo.streamId() : "")
             .set("sampleRate", audioBuffer.getSampleRate())
             .set("channels", audioBuffer.getChannels())
             .set("bufferSize", bufferSize)
@@ -225,7 +227,9 @@ public class WebSocketHandler implements WsListener {
 
     private void handleSessionMeta(JsonObject json, WsSession session) {
         String name = json.stringValue("name", "").trim();
-        sessionManager.updateSessionName(sessionId, name);
+        String instrumentId = json.stringValue("instrumentId", "");
+        String streamId = json.stringValue("streamId", "");
+        sessionManager.updateSessionMetadata(sessionId, name, instrumentId, streamId);
         eventQueue.push(new UserInputEvent(
             sessionId,
             "session-meta",
@@ -237,6 +241,12 @@ public class WebSocketHandler implements WsListener {
         JsonObject ack = JsonValue.objectBuilder()
             .set("type", "session-meta-ack")
             .set("name", name)
+            .set("instrumentId", sessionManager.getSession(sessionId) != null
+                ? sessionManager.getSession(sessionId).instrumentId()
+                : "")
+            .set("streamId", sessionManager.getSession(sessionId) != null
+                ? sessionManager.getSession(sessionId).streamId()
+                : "")
             .build();
         session.send(ack.toString(), true);
     }

@@ -17,11 +17,17 @@ What was done in this session:
 - Updated `docs/top-level-flow.md` to embed the SVG instead of Mermaid
 - Marked the Draw.io file itself as the primary editable source
 
+Follow-up note from 2026-05-27:
+- `docs/top-level-flow.md` now embeds a Mermaid diagram again for VS Code preview compatibility.
+- The Draw.io SVG export contains embedded HTML labels and may show `Text is not SVG - cannot display` in some Markdown renderers.
+- The Draw.io file is still useful as the editable layout source, but the Markdown page should keep a Mermaid fallback or replacement.
+
 Current diagram/doc workflow:
 - Edit the diagram in `top-level flow.drawio`
 - Export the rendered image to `docs/assets/top-level-flow.svg`
-- Keep `docs/top-level-flow.md` as the lightweight wrapper page that embeds the SVG
+- Keep `docs/top-level-flow.md` as the lightweight page with a Mermaid diagram that previews in VS Code
 - Treat the SVG as a generated documentation artifact, not the source of truth
+- If the Draw.io diagram changes, update the Mermaid diagram in `docs/top-level-flow.md` to match the important flow.
 
 Why Mermaid was dropped for this diagram:
 - Mermaid kept reflowing the layout in ways that fought the intended reading order

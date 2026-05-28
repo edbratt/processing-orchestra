@@ -19,12 +19,14 @@ public class InputService implements HttpService {
     private final EventQueue eventQueue;
     private final AudioBuffer audioBuffer;
     private final ControllerConfig controllerConfig;
+    private final OscOutputConfig oscOutputConfig;
 
     public InputService(SessionManager sessionManager, EventQueue eventQueue) {
         this.sessionManager = sessionManager;
         this.eventQueue = eventQueue;
         this.audioBuffer = null;
         this.controllerConfig = ControllerConfig.forSketch("com.processing.server.ProcessingSketch");
+        this.oscOutputConfig = OscOutputConfig.defaults(false);
     }
 
     public InputService(SessionManager sessionManager, EventQueue eventQueue, AudioBuffer audioBuffer) {
@@ -39,6 +41,19 @@ public class InputService implements HttpService {
         this.eventQueue = eventQueue;
         this.audioBuffer = audioBuffer;
         this.controllerConfig = controllerConfig;
+        this.oscOutputConfig = OscOutputConfig.defaults(false);
+    }
+
+    public InputService(SessionManager sessionManager,
+                        EventQueue eventQueue,
+                        AudioBuffer audioBuffer,
+                        ControllerConfig controllerConfig,
+                        OscOutputConfig oscOutputConfig) {
+        this.sessionManager = sessionManager;
+        this.eventQueue = eventQueue;
+        this.audioBuffer = audioBuffer;
+        this.controllerConfig = controllerConfig;
+        this.oscOutputConfig = oscOutputConfig;
     }
 
     @Override
@@ -48,6 +63,7 @@ public class InputService implements HttpService {
             .post("/session", this::createSession)
             .delete("/session/{id}", this::removeSession)
             .get("/controller", this::getController)
+            .get("/orchestra", this::getOrchestra)
             .get("/status", this::getStatus);
     }
 
@@ -93,6 +109,129 @@ public class InputService implements HttpService {
         res.status(Status.OK_200).send(controllerConfig.toJson());
     }
 
+    private void getOrchestra(ServerRequest req, ServerResponse res) {
+        var streams = new ArrayList<JsonValue>();
+        for (OscStreamConfig stream : oscOutputConfig.streams()) {
+            streams.add(JsonValue.objectBuilder()
+                .set("id", stream.id())
+                .set("label", stream.id() + " (" + stream.contract() + " : " + stream.port() + ")")
+                .set("host", stream.host())
+                .set("port", stream.port())
+                .set("contract", stream.contract())
+                .build());
+        }
+
+        var instruments = new ArrayList<JsonValue>();
+        instruments.add(instrument(
+            "full-orchestra",
+            "Full Orchestra",
+            "Touch, buttons, keyboard, motion, and audio clap pings.",
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+        ));
+        instruments.add(instrument(
+            "touch-walker",
+            "Touch Walker",
+            "Touch controls walker XY; buttons and Space send pings.",
+            true,
+            false,
+            false,
+            true,
+            false,
+            false,
+            true
+        ));
+        instruments.add(instrument(
+            "audio-clap",
+            "Audio Clap",
+            "Browser audio claps send pings.",
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false
+        ));
+        instruments.add(instrument(
+            "tilt-walker",
+            "Tilt Walker",
+            "Phone tilt controls walker XY.",
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false
+        ));
+        instruments.add(instrument(
+            "shake-ping",
+            "Shake Ping",
+            "Phone shake sends pings.",
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false
+        ));
+        instruments.add(instrument(
+            "motion-orchestra",
+            "Motion Orchestra",
+            "Phone tilt controls walker XY; shake sends pings.",
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false
+        ));
+
+        JsonObject result = JsonValue.objectBuilder()
+            .set("defaultStreamId", oscOutputConfig.defaultStreamId())
+            .set("defaultInstrumentId", "full-orchestra")
+            .set("streams", JsonArray.create(streams))
+            .set("instruments", JsonArray.create(instruments))
+            .build();
+        res.status(Status.OK_200).send(result);
+    }
+
+    private JsonValue instrument(String id,
+                                 String label,
+                                 String description,
+                                 boolean touch,
+                                 boolean sizeSlider,
+                                 boolean speedSlider,
+                                 boolean actionButtons,
+                                 boolean audio,
+                                 boolean motion,
+                                 boolean keyboard) {
+        JsonObject features = JsonValue.objectBuilder()
+            .set("touch", touch)
+            .set("sizeSlider", sizeSlider)
+            .set("speedSlider", speedSlider)
+            .set("actionButtons", actionButtons)
+            .set("audio", audio)
+            .set("motion", motion)
+            .set("keyboard", keyboard)
+            .build();
+
+        return JsonValue.objectBuilder()
+            .set("id", id)
+            .set("label", label)
+            .set("description", description)
+            .set("features", features)
+            .build();
+    }
+
     private void getStatus(ServerRequest req, ServerResponse res) {
         var builder = JsonValue.objectBuilder()
             .set("activeSessions", sessionManager.getActiveSessionCount())
@@ -104,6 +243,8 @@ public class InputService implements HttpService {
                 .set("sessionId", session.sessionId())
                 .set("createdAt", session.createdAt())
                 .set("name", session.name())
+                .set("instrumentId", session.instrumentId())
+                .set("streamId", session.streamId())
                 .set("lastSeenAt", session.lastSeenAt())
                 .build());
         }

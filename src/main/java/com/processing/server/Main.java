@@ -5,6 +5,7 @@
 package com.processing.server;
 
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -23,6 +24,8 @@ public final class Main {
     private static final String DEFAULT_CONFIG_RESOURCE = "application.yaml";
     private static final String TLS_SOCKET_NAME = "tls";
     private static final String DEFAULT_SKETCH_CLASS = "com.processing.server.ProcessingSketch";
+    private static final String OUTPUT_MODE_SKETCH = "sketch";
+    private static final String OUTPUT_MODE_OSC = "osc";
     private static final long SESSION_STALE_AFTER_MILLIS = 30000;
     private static final long SESSION_REAPER_INTERVAL_MILLIS = 10000;
 
@@ -36,7 +39,9 @@ public final class Main {
         Services.set(Config.class, config);
 
         EventQueue eventQueue = new EventQueue();
-        SessionManager sessionManager = new SessionManager();
+        String outputMode = normalizeOutputMode(config.get("output.mode").asString().orElse(OUTPUT_MODE_SKETCH));
+        OscOutputConfig oscOutputConfig = loadOscOutputConfig(config, startsOsc(outputMode));
+        SessionManager sessionManager = new SessionManager(oscOutputConfig.defaultStreamId());
 
         AudioConfig audioConfig = loadAudioConfig(config);
         MotionConfig motionConfig = loadMotionConfig(config);
@@ -57,10 +62,21 @@ public final class Main {
 
         String sketchClassName = config.get("processing.sketch-class").asString().orElse(DEFAULT_SKETCH_CLASS);
         ControllerConfig controllerConfig = ControllerConfig.forSketch(sketchClassName);
-        startSketch(sketchClassName, eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
+        if (startsSketch(outputMode)) {
+            startSketch(sketchClassName, eventQueue, audioBuffer, width, height, debugConfig, motionConfig);
+        }
         ScheduledExecutorService sessionReaper = startSessionReaper(sessionManager, eventQueue, audioBuffer, debugConfig);
+        OscRuntime oscRuntime = startsOsc(outputMode)
+            ? startOscRuntime(eventQueue, sessionManager, audioBuffer, audioConfig, oscOutputConfig)
+            : OscRuntime.disabled();
 
-        InputService inputService = new InputService(sessionManager, eventQueue, audioBuffer, controllerConfig);
+        InputService inputService = new InputService(
+            sessionManager,
+            eventQueue,
+            audioBuffer,
+            controllerConfig,
+            oscOutputConfig
+        );
         // Attach WebSocket handling to every listener we expose so the browser UI and sketch
         // stay in sync regardless of whether the page was loaded over HTTP or HTTPS.
         var serverBuilder = WebServer.builder()
@@ -82,6 +98,7 @@ public final class Main {
             () -> {
                 WebSocketHandler.broadcastShutdown("Processing Server is shutting down.");
                 sessionReaper.shutdownNow();
+                oscRuntime.close();
             },
             "processing-server-shutdown"));
 
@@ -101,6 +118,10 @@ public final class Main {
                 + motionConfig.getGammaClampDegrees() + "°, magnitude "
                 + motionConfig.getMagnitudeClampG() + "g");
         System.out.println("Sketch class: " + sketchClassName);
+        System.out.println("Output mode: " + outputMode);
+        if (oscRuntime.enabled()) {
+            System.out.println("OSC output: " + oscRuntime.description());
+        }
         System.out.println("Debug logging: " + (debugConfig.isLogging() ? "enabled" : "disabled"));
         System.out.println("Audio debug logging: " + (debugConfig.isAudioLogging() ? "enabled" : "disabled"));
     }
@@ -146,6 +167,113 @@ public final class Main {
             config.get("motion.debug.logging").asBoolean().orElse(false),
             config.get("motion.debug.sample-limit").asInt().orElse(5)
         );
+    }
+
+    private static OscOutputConfig loadOscOutputConfig(Config config, boolean enabled) {
+        OscOutputConfig defaults = OscOutputConfig.defaults(enabled);
+        int fps = Math.max(1, config.get("osc.fps").asInt().orElse(defaults.fps()));
+        OscDebugConfig oscDebugConfig = new OscDebugConfig(
+            config.get("osc.debug.logging").asBoolean().orElse(defaults.debugConfig().logging()),
+            config.get("osc.debug.sample-limit").asInt().orElse(defaults.debugConfig().sampleLimit())
+        );
+        String defaultStreamId = config.get("osc.default-stream").asString().orElse(defaults.defaultStreamId());
+        String streamIds = config.get("osc.streams").asString().orElse("");
+        if (streamIds.isBlank()) {
+            String host = config.get("osc.host").asString().orElse("127.0.0.1");
+            int walkerPort = config.get("osc.walker-port").asInt().orElse(12000);
+            int vectorscopePort = config.get("osc.vectorscope-port").asInt().orElse(12001);
+            boolean mirrorVectorscope = config.get("osc.mirror-vectorscope").asBoolean().orElse(true);
+            List<OscStreamConfig> streams = new ArrayList<>();
+            streams.add(new OscStreamConfig(defaultStreamId, host, walkerPort, OscStreamConfig.CONTRACT_WALKER_TRIGGER));
+            if (mirrorVectorscope) {
+                streams.add(new OscStreamConfig(
+                    "vectorscope",
+                    host,
+                    vectorscopePort,
+                    OscStreamConfig.CONTRACT_WALKER_MONITOR,
+                    defaultStreamId
+                ));
+            }
+            return new OscOutputConfig(enabled, defaultStreamId, List.copyOf(streams), fps, oscDebugConfig);
+        }
+
+        List<OscStreamConfig> streams = new ArrayList<>();
+        for (String rawId : streamIds.split(",")) {
+            String id = rawId.trim();
+            if (id.isBlank()) {
+                continue;
+            }
+            String path = "osc.stream." + id + ".";
+            streams.add(new OscStreamConfig(
+                id,
+                config.get(path + "host").asString().orElse("127.0.0.1"),
+                config.get(path + "port").asInt().orElse(12000),
+                config.get(path + "contract").asString().orElse(OscStreamConfig.CONTRACT_WALKER_TRIGGER),
+                config.get(path + "mirror-source").asString().orElse("")
+            ));
+        }
+        if (streams.isEmpty()) {
+            streams = defaults.streams();
+        }
+        return new OscOutputConfig(
+            enabled,
+            defaultStreamId,
+            List.copyOf(streams),
+            fps,
+            oscDebugConfig
+        );
+    }
+
+    private static boolean startsSketch(String outputMode) {
+        return OUTPUT_MODE_SKETCH.equals(outputMode);
+    }
+
+    private static boolean startsOsc(String outputMode) {
+        return OUTPUT_MODE_OSC.equals(outputMode);
+    }
+
+    private static String normalizeOutputMode(String outputMode) {
+        String normalized = outputMode == null ? OUTPUT_MODE_SKETCH : outputMode.trim().toLowerCase();
+        if (OUTPUT_MODE_SKETCH.equals(normalized) || OUTPUT_MODE_OSC.equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException("Unsupported output.mode: " + outputMode
+            + " (expected '" + OUTPUT_MODE_SKETCH + "' or '" + OUTPUT_MODE_OSC + "')");
+    }
+
+    private static OscRuntime startOscRuntime(EventQueue eventQueue,
+                                              SessionManager sessionManager,
+                                              AudioBuffer audioBuffer,
+                                              AudioConfig audioConfig,
+                                              OscOutputConfig config) {
+        OscOutputService oscOutputService = new OscOutputService(config);
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "osc-event-pump");
+            thread.setDaemon(true);
+            return thread;
+        });
+        executor.scheduleAtFixedRate(
+            new OscEventPump(eventQueue, sessionManager, audioBuffer, audioConfig, oscOutputService, config.defaultStreamId()),
+            0,
+            Math.max(1, 1000 / config.fps()),
+            TimeUnit.MILLISECONDS);
+        return new OscRuntime(true, executor, oscOutputService, describeOsc(config));
+    }
+
+    private static String describeOsc(OscOutputConfig config) {
+        StringBuilder description = new StringBuilder("default=").append(config.defaultStreamId()).append(" streams=");
+        for (int i = 0; i < config.streams().size(); i++) {
+            OscStreamConfig stream = config.streams().get(i);
+            if (i > 0) {
+                description.append(", ");
+            }
+            description.append(stream.id()).append("->").append(stream.host()).append(":").append(stream.port())
+                .append("[").append(stream.contract()).append("]");
+            if (!stream.mirrorSourceId().isBlank()) {
+                description.append("<-").append(stream.mirrorSourceId());
+            }
+        }
+        return description.toString();
     }
 
     private static void startSketch(String sketchClassName,
@@ -228,5 +356,24 @@ public final class Main {
         System.out.println(label + " UI: " + httpProtocol + "://" + displayHost + ":" + port + "/");
         System.out.println(label + " WebSocket: " + wsProtocol + "://" + displayHost + ":" + port + "/ws");
         System.out.println(label + " REST API: " + httpProtocol + "://" + displayHost + ":" + port + "/api/");
+    }
+
+    private record OscRuntime(boolean enabled,
+                              ScheduledExecutorService executor,
+                              OscOutputService service,
+                              String description) implements AutoCloseable {
+        private static OscRuntime disabled() {
+            return new OscRuntime(false, null, null, "");
+        }
+
+        @Override
+        public void close() {
+            if (executor != null) {
+                executor.shutdownNow();
+            }
+            if (service != null) {
+                service.close();
+            }
+        }
     }
 }

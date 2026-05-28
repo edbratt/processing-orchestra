@@ -39,6 +39,14 @@ The `Run property` column below contains the value to put inside the quoted `-Pr
 | `AbandonedArt79Sketch` | `-Dprocessing.sketch-class=com.processing.server.AbandonedArt79Sketch` | [AbandonedArt79Sketch.java](../../src/main/java/com/processing/server/AbandonedArt79Sketch.java) | Adaptation of AbandonedArt 79 as per-user motion-oriented grid fields | Included |
 | `AbandonedArt90Sketch` | `-Dprocessing.sketch-class=com.processing.server.AbandonedArt90Sketch` | [AbandonedArt90Sketch.java](../../src/main/java/com/processing/server/AbandonedArt90Sketch.java) | Adaptation of AbandonedArt 90 as per-user movable spherical line-cloud graphics | Included |
 
+## V2 Standalone Performer Sketches
+
+These sketches run separately in the Processing IDE and listen to OSC emitted by `output.mode=osc`.
+
+| Sketch | File | OSC port | Purpose | Status |
+|---|---|---:|---|---|
+| `gravity_orbit_v2` | [gravity_orbit_v2.pde](../../samples/v2-performers/gravity_orbit_v2/gravity_orbit_v2.pde) | `12002` | Standalone gravity-orbit performer with one orbiter per collaborator using `orchestra-session-v1` | Included |
+
 ## PDE Converter Trial Samples
 
 These are sample PDE inputs used to exercise the converter workflow. They are included in the repo as trial/sample material. Some generated Java outputs from these samples may also exist under `generated-src/`, but this table tracks the original PDE source fixtures.

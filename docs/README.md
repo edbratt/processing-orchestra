@@ -14,6 +14,9 @@ This project now keeps detailed documentation under `docs/` so the top-level [RE
 - [Top-Level Session Flow](top-level-flow.md)
 - [Customization Guide](java-coding/customization-guide.md)
 - [Runtime Overview](java-coding/runtime-overview.md)
+- [V2 OSC Instrument Plan](work-in-progress/V2_OSC_INSTRUMENT_PLAN.md)
+- [V2 OSC Backlog](work-in-progress/V2_OSC_BACKLOG.md)
+- [V2 Single-Note Pitch Plan](work-in-progress/V2_SINGLE_NOTE_PITCH_PLAN.md)
 
 ## Sketch References
 

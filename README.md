@@ -5,6 +5,8 @@
 
 Processing Server is a multi-user browser controller for Processing sketches running on the server machine. Multiple clients can connect at once and send touch, slider, button, keyboard, audio, and phone-motion input into a shared visual sketch.
 
+On the v2 OSC branch, the server can also run as a browser-instrument-to-OSC bridge. Users choose an instrument and OSC stream in the browser, the server processes each session, and graphical performer sketches listen for OSC on configured ports.
+
 ## Quick Start
 
 Requirements:
@@ -26,6 +28,12 @@ Run a different included sketch:
 
 ```powershell
 .\run.ps1 -Properties "-Dprocessing.sketch-class=com.processing.server.StarterSketch"
+```
+
+Run OSC-only mode for performer sketches:
+
+```powershell
+.\run.ps1 -Properties "-Doutput.mode=osc -Dosc.debug.logging=true"
 ```
 
 ## Mobile and LAN Use
@@ -64,6 +72,7 @@ Core references:
 - [Documentation Index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Top-Level Session Flow](docs/top-level-flow.md)
+- [V2 OSC Instrument Plan](docs/work-in-progress/V2_OSC_INSTRUMENT_PLAN.md)
 - [Customization Guide](docs/java-coding/customization-guide.md)
 - [Runtime Overview](docs/java-coding/runtime-overview.md)
 

@@ -202,6 +202,45 @@
             display: inline-block;
             margin-right: 20px;
         }
+        .motion-tuning {
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: 1fr 92px;
+            gap: 14px;
+            align-items: stretch;
+        }
+        .motion-x-controls,
+        .motion-shake-control {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .motion-y-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            align-items: end;
+            justify-items: center;
+        }
+        .motion-v-slider {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+        .motion-v-slider input[type="range"] {
+            width: 86px;
+            transform: rotate(-90deg);
+            transform-origin: center;
+            margin: 36px 0;
+        }
+        .motion-v-slider label,
+        .motion-x-controls label,
+        .motion-shake-control label {
+            font-size: 11px;
+            color: #bbb;
+        }
     </style>
 </head>
 <body>
@@ -220,6 +259,16 @@
                     autocomplete="name"
                     maxlength="40">
                 <button id="btnSaveSessionName" style="margin-top: 8px; min-width: 120px;">Save Name</button>
+                <div style="margin-top: 8px;">
+                    <select id="sessionInstrumentSelect" class="keyboard-input" style="max-width: 220px;">
+                        <option value="full-orchestra">Full Orchestra</option>
+                    </select>
+                </div>
+                <div style="margin-top: 8px;">
+                    <select id="sessionStreamInput" class="keyboard-input" style="max-width: 220px;">
+                        <option value="">Default OSC stream</option>
+                    </select>
+                </div>
             </div>
         </div>
         
@@ -288,9 +337,29 @@
                 <div style="margin-top: 10px; font-size: 11px; color: #888;">
                     <span id="motionDetails">Orientation sensor status unavailable.</span>
                 </div>
-                <div style="margin-top: 12px;">
-                    <label>Motion Trim: <span id="motionTrimValue">1.0x</span></label>
-                    <input type="range" id="motionTrimSlider" min="0" max="100" value="50">
+                <div class="motion-tuning">
+                    <div>
+                        <div class="motion-x-controls">
+                            <label>X Trim: <span id="motionXTrimValue">1.00x</span></label>
+                            <input type="range" id="motionXTrimSlider" min="0" max="100" value="30">
+                            <label>X Offset: <span id="motionXOffsetValue">0.00</span></label>
+                            <input type="range" id="motionXOffsetSlider" min="0" max="100" value="50">
+                        </div>
+                        <div class="motion-shake-control">
+                            <label>Shake Threshold: <span id="motionShakeThresholdValue">1.20g</span></label>
+                            <input type="range" id="motionShakeThresholdSlider" min="0" max="100" value="36">
+                        </div>
+                    </div>
+                    <div class="motion-y-controls">
+                        <div class="motion-v-slider">
+                            <label>Y Trim<br><span id="motionYTrimValue">1.00x</span></label>
+                            <input type="range" id="motionYTrimSlider" min="0" max="100" value="30">
+                        </div>
+                        <div class="motion-v-slider">
+                            <label>Y Offset<br><span id="motionYOffsetValue">0.00</span></label>
+                            <input type="range" id="motionYOffsetSlider" min="0" max="100" value="50">
+                        </div>
+                    </div>
                 </div>
                 <div style="margin-top: 10px; font-size: 12px; color: #bbb;">
                     <div>Beta: <span id="motionBetaValue">-</span></div>
@@ -362,7 +431,6 @@
             acceleration: 3,
             magnitude: 4
         };
-        let motionTrim = 1.0;
         let latestOrientationSample = null;
         let latestAccelerationSample = null;
         const pressedKeys = new Map();
@@ -370,6 +438,9 @@
         let reconnectTimerId = null;
         let heartbeatTimerId = null;
         let pageUnloading = false;
+        let lastSurfaceTap = null;
+        const surfaceDoubleTapMaxMs = 320;
+        const surfaceDoubleTapMaxDistance = 0.12;
         let controllerConfig = {
             title: 'Processing Server UI',
             features: {
@@ -381,6 +452,14 @@
                 motion: true,
                 keyboard: true
             }
+        };
+        let orchestraConfig = {
+            defaultStreamId: '',
+            defaultInstrumentId: 'full-orchestra',
+            streams: [],
+            instruments: [
+                { id: 'full-orchestra', label: 'Full Orchestra' }
+            ]
         };
 
         const sectionIdsByFeature = {
@@ -395,6 +474,19 @@
 
         function hasFeature(name) {
             return controllerConfig.features?.[name] === true;
+        }
+
+        function selectedInstrument() {
+            const instrumentId = element('sessionInstrumentSelect')?.value || orchestraConfig.defaultInstrumentId || 'full-orchestra';
+            return (orchestraConfig.instruments || []).find((instrument) => instrument.id === instrumentId) || null;
+        }
+
+        function instrumentHasFeature(name) {
+            const instrument = selectedInstrument();
+            if (!instrument || instrument.id === 'full-orchestra') {
+                return hasFeature(name);
+            }
+            return hasFeature(name) && instrument.features?.[name] === true;
         }
 
         function element(id) {
@@ -421,6 +513,53 @@
             applyControllerConfig();
         }
 
+        async function loadOrchestraConfig() {
+            try {
+                const response = await fetch('/api/orchestra', { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error(`Orchestra config request failed: ${response.status}`);
+                }
+                orchestraConfig = await response.json();
+            } catch (err) {
+                log('Using default orchestra config', err);
+            }
+            applyOrchestraConfig();
+        }
+
+        function applyOrchestraConfig() {
+            const instrumentSelect = element('sessionInstrumentSelect');
+            const streamSelect = element('sessionStreamInput');
+            if (instrumentSelect) {
+                instrumentSelect.innerHTML = '';
+                const instruments = orchestraConfig.instruments?.length
+                    ? orchestraConfig.instruments
+                    : [{ id: 'full-orchestra', label: 'Full Orchestra' }];
+                instruments.forEach((instrument) => {
+                    const option = document.createElement('option');
+                    option.value = instrument.id;
+                    option.textContent = instrument.label || instrument.id;
+                    if (instrument.description) {
+                        option.title = instrument.description;
+                    }
+                    instrumentSelect.appendChild(option);
+                });
+            }
+            if (streamSelect) {
+                streamSelect.innerHTML = '';
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = `Default OSC stream${orchestraConfig.defaultStreamId ? ` (${orchestraConfig.defaultStreamId})` : ''}`;
+                streamSelect.appendChild(defaultOption);
+                (orchestraConfig.streams || []).forEach((stream) => {
+                    const option = document.createElement('option');
+                    option.value = stream.id;
+                    option.textContent = stream.label || stream.id;
+                    streamSelect.appendChild(option);
+                });
+            }
+            applyInstrumentVisibility();
+        }
+
         function applyControllerConfig() {
             element('controllerTitle').textContent = controllerConfig.title || 'Processing Server UI';
             document.title = controllerConfig.title || 'Processing Server UI';
@@ -430,6 +569,24 @@
                     continue;
                 }
                 ids.forEach((id) => element(id)?.remove());
+            }
+        }
+
+        function applyInstrumentVisibility() {
+            for (const [feature, ids] of Object.entries(sectionIdsByFeature)) {
+                ids.forEach((id) => {
+                    const target = element(id);
+                    if (!target) {
+                        return;
+                    }
+                    target.style.display = instrumentHasFeature(feature) ? '' : 'none';
+                });
+            }
+            if (!instrumentHasFeature('audio') && audioRunning) {
+                stopAudio();
+            }
+            if (!instrumentHasFeature('motion') && motionEnabled) {
+                stopMotion();
             }
         }
         
@@ -456,10 +613,23 @@
             return `${db > 0 ? '+' : ''}${Math.round(db)} dB`;
         }
 
-        function formatMotionTrimLabel(sliderValue) {
-            const normalized = sliderValue / 100;
-            const trimFactor = Math.pow(2, (normalized - 0.5) * 3);
-            return `${trimFactor.toFixed(1)}x`;
+        function motionTrimValue(sliderValue) {
+            return 0.25 + (sliderValue / 100) * 2.75;
+        }
+
+        function motionOffsetValue(sliderValue) {
+            return -1 + (sliderValue / 100) * 2;
+        }
+
+        function motionShakeThresholdValue(sliderValue) {
+            return 0.2 + (sliderValue / 100) * 2.8;
+        }
+
+        function updateMotionTuningLabel(id, value, suffix = '') {
+            const target = element(id);
+            if (target) {
+                target.textContent = `${value.toFixed(2)}${suffix}`;
+            }
         }
         
         function canAccessMicrophone() {
@@ -554,16 +724,54 @@
             }
         }
 
+        function saveSessionStreamLocally(streamId) {
+            try {
+                window.localStorage.setItem('processingServerStream', streamId);
+            } catch (err) {
+                log('Unable to store session stream locally', err);
+            }
+        }
+
+        function loadSavedSessionStream() {
+            try {
+                return window.localStorage.getItem('processingServerStream') || '';
+            } catch (err) {
+                return '';
+            }
+        }
+
+        function saveSessionInstrumentLocally(instrumentId) {
+            try {
+                window.localStorage.setItem('processingServerInstrument', instrumentId);
+            } catch (err) {
+                log('Unable to store session instrument locally', err);
+            }
+        }
+
+        function loadSavedSessionInstrument() {
+            try {
+                return window.localStorage.getItem('processingServerInstrument') || '';
+            } catch (err) {
+                return '';
+            }
+        }
+
         function sendSessionMetaUpdate() {
             if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId) {
                 return;
             }
 
             const name = document.getElementById('sessionNameInput').value.trim();
+            const streamId = document.getElementById('sessionStreamInput').value.trim();
+            const instrumentId = document.getElementById('sessionInstrumentSelect').value.trim();
             saveSessionNameLocally(name);
+            saveSessionStreamLocally(streamId);
+            saveSessionInstrumentLocally(instrumentId);
             ws.send(JSON.stringify({
                 type: 'session-meta',
                 name,
+                streamId,
+                instrumentId,
                 timestamp: Date.now()
             }));
         }
@@ -745,17 +953,14 @@
                 return null;
             }
 
-            const scaleSigned = (value, clampMax) => clampSigned(value * motionTrim, clampMax);
-            const scaleUnsigned = (value, clampMax) => clampUnsigned(value * motionTrim, clampMax);
-
             return {
-                alpha: latestOrientationSample ? scaleSigned(latestOrientationSample.alpha, motionClamp.alpha) : 0,
-                beta: latestOrientationSample ? scaleSigned(latestOrientationSample.beta, motionClamp.beta) : 0,
-                gamma: latestOrientationSample ? scaleSigned(latestOrientationSample.gamma, motionClamp.gamma) : 0,
-                ax: latestAccelerationSample ? scaleSigned(latestAccelerationSample.ax, motionClamp.acceleration) : 0,
-                ay: latestAccelerationSample ? scaleSigned(latestAccelerationSample.ay, motionClamp.acceleration) : 0,
-                az: latestAccelerationSample ? scaleSigned(latestAccelerationSample.az, motionClamp.acceleration) : 0,
-                magnitude: latestAccelerationSample ? scaleUnsigned(latestAccelerationSample.magnitude, motionClamp.magnitude) : 0
+                alpha: latestOrientationSample ? clampSigned(latestOrientationSample.alpha, motionClamp.alpha) : 0,
+                beta: latestOrientationSample ? clampSigned(latestOrientationSample.beta, motionClamp.beta) : 0,
+                gamma: latestOrientationSample ? clampSigned(latestOrientationSample.gamma, motionClamp.gamma) : 0,
+                ax: latestAccelerationSample ? clampSigned(latestAccelerationSample.ax, motionClamp.acceleration) : 0,
+                ay: latestAccelerationSample ? clampSigned(latestAccelerationSample.ay, motionClamp.acceleration) : 0,
+                az: latestAccelerationSample ? clampSigned(latestAccelerationSample.az, motionClamp.acceleration) : 0,
+                magnitude: latestAccelerationSample ? clampUnsigned(latestAccelerationSample.magnitude, motionClamp.magnitude) : 0
             };
         }
 
@@ -809,7 +1014,7 @@
         }
 
         function handleDeviceMotion(event) {
-            const acc = event.accelerationIncludingGravity || event.acceleration;
+            const acc = event.acceleration || event.accelerationIncludingGravity;
             if (!acc) {
                 return;
             }
@@ -951,6 +1156,17 @@
                     } else {
                         document.getElementById('sessionNameInput').value = loadSavedSessionName();
                     }
+                    document.getElementById('sessionStreamInput').value =
+                        new URLSearchParams(window.location.search).get('streamId')
+                        || data.streamId
+                        || loadSavedSessionStream();
+                    document.getElementById('sessionInstrumentSelect').value =
+                        new URLSearchParams(window.location.search).get('instrumentId')
+                        || data.instrumentId
+                        || loadSavedSessionInstrument()
+                        || orchestraConfig.defaultInstrumentId
+                        || 'full-orchestra';
+                    applyInstrumentVisibility();
                     sendSessionMetaUpdate();
                     if (data.sampleRate) {
                         audioConfig.sampleRate = data.sampleRate;
@@ -984,6 +1200,15 @@
                     if (typeof data.name === 'string') {
                         document.getElementById('sessionNameInput').value = data.name;
                         saveSessionNameLocally(data.name);
+                    }
+                    if (typeof data.streamId === 'string') {
+                        document.getElementById('sessionStreamInput').value = data.streamId;
+                        saveSessionStreamLocally(data.streamId);
+                    }
+                    if (typeof data.instrumentId === 'string') {
+                        document.getElementById('sessionInstrumentSelect').value = data.instrumentId || 'full-orchestra';
+                        saveSessionInstrumentLocally(data.instrumentId || 'full-orchestra');
+                        applyInstrumentVisibility();
                     }
                     break;
                 case 'audio-config-ack':
@@ -1291,20 +1516,67 @@
             }
         }
         
+        function surfacePoint(clientX, clientY) {
+            const rect = element('touchArea').getBoundingClientRect();
+            return {
+                x: (clientX - rect.left) / rect.width,
+                y: (clientY - rect.top) / rect.height
+            };
+        }
+
+        function maybeSendSurfaceDoubleTap(point) {
+            const now = Date.now();
+            if (lastSurfaceTap) {
+                const elapsed = now - lastSurfaceTap.timestamp;
+                const dx = point.x - lastSurfaceTap.x;
+                const dy = point.y - lastSurfaceTap.y;
+                const distance = Math.sqrt((dx * dx) + (dy * dy));
+                if (elapsed <= surfaceDoubleTapMaxMs && distance <= surfaceDoubleTapMaxDistance) {
+                    sendEvent('button', 'surfaceDoubleTap');
+                    lastSurfaceTap = null;
+                    return;
+                }
+            }
+            lastSurfaceTap = {
+                timestamp: now,
+                x: point.x,
+                y: point.y
+            };
+        }
+
         function handleTouch(e) {
             e.preventDefault();
             const touch = e.touches[0];
-            const rect = element('touchArea').getBoundingClientRect();
-            const x = (touch.clientX - rect.left) / rect.width;
-            const y = (touch.clientY - rect.top) / rect.height;
-            sendEvent('touch', 'touchArea', 0, x, y);
+            if (!touch) {
+                return;
+            }
+            const point = surfacePoint(touch.clientX, touch.clientY);
+            sendEvent('touch', 'touchArea', 0, point.x, point.y);
+            if (e.type === 'touchstart') {
+                maybeSendSurfaceDoubleTap(point);
+            }
         }
         
         function handleMouse(e) {
-            const rect = element('touchArea').getBoundingClientRect();
-            const x = (e.clientX - rect.left) / rect.width;
-            const y = (e.clientY - rect.top) / rect.height;
-            sendEvent('touch', 'touchArea', 0, x, y);
+            const point = surfacePoint(e.clientX, e.clientY);
+            sendEvent('touch', 'touchArea', 0, point.x, point.y);
+            if (e.type === 'mousedown') {
+                maybeSendSurfaceDoubleTap(point);
+            }
+        }
+
+        function wireMotionSlider(sliderId, valueId, controlId, mapper, suffix = '') {
+            const slider = element(sliderId);
+            if (!slider) {
+                return;
+            }
+            const sendMotionControl = () => {
+                const value = mapper(Number(slider.value));
+                updateMotionTuningLabel(valueId, value, suffix);
+                sendEvent('slider', controlId, value);
+            };
+            sendMotionControl();
+            slider.addEventListener('input', sendMotionControl);
         }
 
         function wireControllerEvents() {
@@ -1344,12 +1616,11 @@
             }
 
             if (hasFeature('motion')) {
-                on('motionTrimSlider', 'input', (e) => {
-                    const sliderValue = Number(e.target.value);
-                    const normalized = sliderValue / 100;
-                    motionTrim = Math.pow(2, (normalized - 0.5) * 3);
-                    element('motionTrimValue').textContent = formatMotionTrimLabel(sliderValue);
-                });
+                wireMotionSlider('motionXTrimSlider', 'motionXTrimValue', 'motionXTrim', motionTrimValue, 'x');
+                wireMotionSlider('motionYTrimSlider', 'motionYTrimValue', 'motionYTrim', motionTrimValue, 'x');
+                wireMotionSlider('motionXOffsetSlider', 'motionXOffsetValue', 'motionXOffset', motionOffsetValue);
+                wireMotionSlider('motionYOffsetSlider', 'motionYOffsetValue', 'motionYOffset', motionOffsetValue);
+                wireMotionSlider('motionShakeThresholdSlider', 'motionShakeThresholdValue', 'motionShakeThreshold', motionShakeThresholdValue, 'g');
                 on('btnStartMotion', 'click', startMotion);
                 on('btnStopMotion', 'click', stopMotion);
             }
@@ -1366,6 +1637,17 @@
                     event.preventDefault();
                     sendSessionMetaUpdate();
                 }
+            });
+            on('sessionStreamInput', 'keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    sendSessionMetaUpdate();
+                }
+            });
+            on('sessionStreamInput', 'change', sendSessionMetaUpdate);
+            on('sessionInstrumentSelect', 'change', () => {
+                applyInstrumentVisibility();
+                sendSessionMetaUpdate();
             });
 
             if (hasFeature('keyboard')) {
@@ -1428,13 +1710,18 @@
         
         async function initializeController() {
             await loadControllerConfig();
+            await loadOrchestraConfig();
             wireControllerEvents();
             updateAudioUI();
             detectMotionSupport();
             element('sessionNameInput').value = loadSavedSessionName();
-            if (hasFeature('motion')) {
-                element('motionTrimValue').textContent = formatMotionTrimLabel(50);
-            }
+            element('sessionStreamInput').value = new URLSearchParams(window.location.search).get('streamId') || loadSavedSessionStream();
+            element('sessionInstrumentSelect').value =
+                new URLSearchParams(window.location.search).get('instrumentId')
+                || loadSavedSessionInstrument()
+                || orchestraConfig.defaultInstrumentId
+                || 'full-orchestra';
+            applyInstrumentVisibility();
             updateKeyboardStatus(document.hasFocus() ? 'Ready' : 'Waiting for page focus');
             connect();
         }
